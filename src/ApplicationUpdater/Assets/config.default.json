@@ -1,0 +1,49 @@
+{
+  "general": {
+    "autoCheckUpdates": true,
+    "checkIntervalHours": 24,
+    "createBackups": true,
+    "backupDirectory": "backups",
+    "showOnlyUpdatable": false,
+    "startMinimized": false
+  },
+  "updateSources": {
+    "winget": {
+      "enabled": true,
+      "priority": 1
+    },
+    "chocolatey": {
+      "enabled": true,
+      "priority": 2
+    }
+  },
+  "exclusions": {
+    "programs": [
+      "Windows Security",
+      "Microsoft Edge WebView2 Runtime",
+      "Microsoft Visual C++ 2015-2022 Redistributable"
+    ],
+    "publishers": [],
+    "keywords": [
+      "driver",
+      "codec",
+      "redistributable",
+      "runtime"
+    ],
+    "packageIds": []
+  },
+  "updateBehavior": {
+    "requireConfirmation": true,
+    "maxConcurrentUpdates": 2,
+    "restartIfRequired": false,
+    "includeUnknown": true,
+    "includePinned": false,
+    "acceptAgreements": true,
+    "silent": true
+  },
+  "notifications": {
+    "showUpdateAvailable": true,
+    "showUpdateComplete": true,
+    "showErrors": true
+  }
+}

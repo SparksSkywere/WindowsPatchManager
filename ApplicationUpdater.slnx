@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ApplicationUpdater/ApplicationUpdater.csproj" />
+  </Folder>
+  <Folder Name="/installer/">
+    <Project Path="installer/wix/ApplicationUpdater.Installer/ApplicationUpdater.Installer.wixproj" />
+    <Project Path="installer/wix/ApplicationUpdater.Bundle/ApplicationUpdater.Bundle.wixproj" />
+  </Folder>
+</Solution>

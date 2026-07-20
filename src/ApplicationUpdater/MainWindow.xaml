@@ -1,0 +1,232 @@
+<Window x:Class="ApplicationUpdater.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Windows Patch Manager"
+        Height="720" Width="1100"
+        MinHeight="520" MinWidth="860"
+        WindowStartupLocation="CenterScreen"
+        Icon="pack://application:,,,/Assets/app.ico">
+
+    <Window.InputBindings>
+        <KeyBinding Key="F5" Command="{Binding ScanCommand}"/>
+        <KeyBinding Key="F6" Command="{Binding CheckUpdatesCommand}"/>
+        <KeyBinding Key="S" Modifiers="Control" Command="{Binding ExportCommand}"/>
+        <KeyBinding Key="A" Modifiers="Control" Command="{Binding SelectAllCommand}"/>
+        <KeyBinding Key="Escape" Command="{Binding CancelCommand}"/>
+    </Window.InputBindings>
+
+    <DockPanel>
+        <!-- Menu bar (Windows standard) -->
+        <Menu DockPanel.Dock="Top">
+            <MenuItem Header="_File">
+                <MenuItem Header="_Scan programs" InputGestureText="F5" Command="{Binding ScanCommand}"/>
+                <MenuItem Header="_Check for updates" InputGestureText="F6" Command="{Binding CheckUpdatesCommand}"/>
+                <Separator/>
+                <MenuItem Header="_Export list..." InputGestureText="Ctrl+S" Command="{Binding ExportCommand}"/>
+                <MenuItem Header="Open _config folder" Command="{Binding OpenConfigFolderCommand}"/>
+                <Separator/>
+                <MenuItem Header="E_xit" Click="Exit_Click"/>
+            </MenuItem>
+            <MenuItem Header="_Edit">
+                <MenuItem Header="Select _all" InputGestureText="Ctrl+A" Command="{Binding SelectAllCommand}"/>
+                <MenuItem Header="Select _none" Command="{Binding SelectNoneCommand}"/>
+                <MenuItem Header="Select _updates only" Command="{Binding SelectUpdatesOnlyCommand}"/>
+            </MenuItem>
+            <MenuItem Header="_View">
+                <MenuItem Header="Show updates only" IsCheckable="True" IsChecked="{Binding ShowUpdatesOnly}"/>
+                <Separator/>
+                <MenuItem Header="Clear _log" Command="{Binding ClearLogCommand}"/>
+            </MenuItem>
+            <MenuItem Header="_Tools">
+                <MenuItem Header="_Update selected" Command="{Binding UpdateSelectedCommand}"/>
+                <MenuItem Header="Update _all available" Command="{Binding UpdateAllCommand}"/>
+                <Separator/>
+                <MenuItem Header="Create daily schedule..." Command="{Binding CreateScheduleCommand}"/>
+                <MenuItem Header="Remove schedule" Command="{Binding RemoveScheduleCommand}"/>
+                <Separator/>
+                <MenuItem Header="_Options..." Click="Options_Click"/>
+            </MenuItem>
+            <MenuItem Header="_Help">
+                <MenuItem Header="_About Windows Patch Manager" Click="About_Click"/>
+            </MenuItem>
+        </Menu>
+
+        <!-- Toolbar -->
+        <Border DockPanel.Dock="Top" Background="{StaticResource PanelBackgroundBrush}"
+                BorderBrush="{StaticResource BorderBrushSubtle}" BorderThickness="0,0,0,1" Padding="6,4">
+            <DockPanel>
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
+                    <Button Content="Scan" Style="{StaticResource ToolbarButtonStyle}"
+                            Command="{Binding ScanCommand}" ToolTip="Scan installed programs (F5)"/>
+                    <Button Content="Check updates" Style="{StaticResource PrimaryButtonStyle}"
+                            Command="{Binding CheckUpdatesCommand}" ToolTip="Check for available updates (F6)"/>
+                    <Rectangle Width="1" Fill="{StaticResource BorderBrushSubtle}" Margin="8,4"/>
+                    <Button Content="Update selected" Style="{StaticResource ToolbarButtonStyle}"
+                            Command="{Binding UpdateSelectedCommand}" ToolTip="Install updates for selected programs"/>
+                    <Button Content="Update all" Style="{StaticResource ToolbarButtonStyle}"
+                            Command="{Binding UpdateAllCommand}" ToolTip="Install all available updates"/>
+                    <Rectangle Width="1" Fill="{StaticResource BorderBrushSubtle}" Margin="8,4"/>
+                    <Button Content="Options" Style="{StaticResource ToolbarButtonStyle}"
+                            Click="Options_Click" ToolTip="Open settings"/>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
+                    <TextBlock Text="Search:" VerticalAlignment="Center" Margin="0,0,6,0"
+                               Style="{StaticResource MutedTextStyle}"/>
+                    <TextBox Width="220" VerticalAlignment="Center"
+                             Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                             ToolTip="Filter by name, package ID, publisher, or source"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- Status bar -->
+        <StatusBar DockPanel.Dock="Bottom">
+            <StatusBarItem>
+                <TextBlock Text="{Binding StatusText}" MinWidth="280"/>
+            </StatusBarItem>
+            <Separator/>
+            <StatusBarItem>
+                <TextBlock Text="{Binding SummaryText}" Style="{StaticResource MutedTextStyle}"/>
+            </StatusBarItem>
+            <StatusBarItem HorizontalAlignment="Right">
+                <ProgressBar Width="160" Height="14"
+                             Minimum="0" Maximum="100"
+                             Value="{Binding ProgressValue}"
+                             IsIndeterminate="{Binding IsProgressIndeterminate}"/>
+            </StatusBarItem>
+            <StatusBarItem HorizontalAlignment="Right">
+                <Button Content="Cancel" Padding="8,1" Margin="6,0,0,0"
+                        Command="{Binding CancelCommand}"
+                        Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}}"/>
+            </StatusBarItem>
+        </StatusBar>
+
+        <!-- Main content -->
+        <Grid Margin="10">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="180"/>
+            </Grid.RowDefinitions>
+
+            <DockPanel Grid.Row="0" Margin="0,0,0,8">
+                <StackPanel Orientation="Horizontal">
+                    <Button Content="Select all" Style="{StaticResource ToolbarButtonStyle}" Command="{Binding SelectAllCommand}"/>
+                    <Button Content="Select none" Style="{StaticResource ToolbarButtonStyle}" Command="{Binding SelectNoneCommand}"/>
+                    <Button Content="Select updates" Style="{StaticResource ToolbarButtonStyle}" Command="{Binding SelectUpdatesOnlyCommand}"/>
+                    <CheckBox Content="Show updates only" Margin="12,0,0,0"
+                              IsChecked="{Binding ShowUpdatesOnly}" VerticalAlignment="Center"/>
+                </StackPanel>
+                <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right"
+                           VerticalAlignment="Center"
+                           Text="{Binding UpdateCount, StringFormat={}{0} update(s) available}"
+                           FontWeight="SemiBold"
+                           Foreground="{StaticResource AccentBrush}"/>
+            </DockPanel>
+
+            <Border Grid.Row="1" Background="{StaticResource PanelBackgroundBrush}"
+                    BorderBrush="{StaticResource BorderBrushSubtle}" BorderThickness="1" CornerRadius="2">
+                <ListView x:Name="ProgramList"
+                          ItemsSource="{Binding ProgramsView}"
+                          BorderThickness="0"
+                          AlternationCount="2"
+                          VirtualizingPanel.IsVirtualizing="True"
+                          VirtualizingPanel.VirtualizationMode="Recycling">
+                    <ListView.Resources>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                            <Setter Property="Padding" Value="4,3"/>
+                            <Style.Triggers>
+                                <Trigger Property="ItemsControl.AlternationIndex" Value="1">
+                                    <Setter Property="Background" Value="#FFF7F7F7"/>
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ListView.Resources>
+                    <ListView.View>
+                        <GridView>
+                            <GridViewColumn Width="36">
+                                <GridViewColumn.Header>
+                                    <TextBlock Text="" ToolTip="Select"/>
+                                </GridViewColumn.Header>
+                                <GridViewColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  HorizontalAlignment="Center"/>
+                                    </DataTemplate>
+                                </GridViewColumn.CellTemplate>
+                            </GridViewColumn>
+                            <GridViewColumn Header="Program" Width="280">
+                                <GridViewColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Name}"
+                                                   FontWeight="{Binding UpdateAvailable, Converter={StaticResource BoolToBold}}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   ToolTip="{Binding Name}"/>
+                                    </DataTemplate>
+                                </GridViewColumn.CellTemplate>
+                            </GridViewColumn>
+                            <GridViewColumn Header="Current" Width="110" DisplayMemberBinding="{Binding Version}"/>
+                            <GridViewColumn Header="Status" Width="120">
+                                <GridViewColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding UpdateStatus}"
+                                                   Foreground="{Binding UpdateAvailable, Converter={StaticResource UpdateStatusBrush}}"
+                                                   FontWeight="{Binding UpdateAvailable, Converter={StaticResource BoolToBold}}"/>
+                                    </DataTemplate>
+                                </GridViewColumn.CellTemplate>
+                            </GridViewColumn>
+                            <GridViewColumn Header="Available" Width="110" DisplayMemberBinding="{Binding AvailableVersion}"/>
+                            <GridViewColumn Header="Source" Width="90" DisplayMemberBinding="{Binding Source}"/>
+                            <GridViewColumn Header="Package ID" Width="200">
+                                <GridViewColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding PackageId}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   ToolTip="{Binding PackageId}"
+                                                   Style="{StaticResource MutedTextStyle}"/>
+                                    </DataTemplate>
+                                </GridViewColumn.CellTemplate>
+                            </GridViewColumn>
+                            <GridViewColumn Header="Publisher" Width="160">
+                                <GridViewColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Publisher}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   ToolTip="{Binding Publisher}"/>
+                                    </DataTemplate>
+                                </GridViewColumn.CellTemplate>
+                            </GridViewColumn>
+                        </GridView>
+                    </ListView.View>
+                </ListView>
+            </Border>
+
+            <GroupBox Grid.Row="2" Header="Activity log" Margin="0,10,0,0">
+                <DockPanel>
+                    <Button DockPanel.Dock="Top" HorizontalAlignment="Right"
+                            Content="Clear" Padding="8,2" Margin="0,0,0,4"
+                            Style="{StaticResource ToolbarButtonStyle}"
+                            Command="{Binding ClearLogCommand}"/>
+                    <ListBox ItemsSource="{Binding LogEntries}"
+                             BorderThickness="0"
+                             FontFamily="{StaticResource AppFontMono}"
+                             FontSize="11"
+                             ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="Padding" Value="2,1"/>
+                                <Setter Property="IsHitTestVisible" Value="False"/>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                    </ListBox>
+                </DockPanel>
+            </GroupBox>
+        </Grid>
+    </DockPanel>
+</Window>

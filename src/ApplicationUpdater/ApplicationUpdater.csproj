@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Baked into EXE; file synced from assets\installer.ico before each build -->
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <AssemblyName>WindowsPatchManager</AssemblyName>
+    <RootNamespace>ApplicationUpdater</RootNamespace>
+    <Product>Windows Patch Manager</Product>
+    <Title>Windows Patch Manager</Title>
+    <AssemblyTitle>Windows Patch Manager</AssemblyTitle>
+    <Company>Skywere Industries</Company>
+    <Authors>Skywere Industries</Authors>
+    <Copyright>Copyright © Skywere Industries</Copyright>
+    <Description>Manage software updates on Windows using winget and Chocolatey.</Description>
+    <Version>2.1.1</Version>
+    <FileVersion>2.1.1</FileVersion>
+    <AssemblyVersion>2.1.1.0</AssemblyVersion>
+    <NeutralLanguage>en-US</NeutralLanguage>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="System.Management" Version="10.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Assets\config.default.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+    <!-- WPF pack://application:,,,/Assets/app.ico -->
+    <Resource Include="Assets\app.ico" />
+  </ItemGroup>
+
+  <!-- Before every build, pull production icon from repo assets\installer.ico -->
+  <Target Name="SyncProductionIcon" BeforeTargets="PrepareForBuild;BeforeBuild;BeforePublish">
+    <PropertyGroup>
+      <_InstallerIco>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\assets\installer.ico'))</_InstallerIco>
+      <_AppIco>$(MSBuildProjectDirectory)\Assets\app.ico</_AppIco>
+    </PropertyGroup>
+    <Copy SourceFiles="$(_InstallerIco)" DestinationFiles="$(_AppIco)" SkipUnchangedFiles="false"
+          Condition="Exists('$(_InstallerIco)')" />
+    <Message Importance="high" Text="Synced app icon from assets\installer.ico" Condition="Exists('$(_InstallerIco)')" />
+  </Target>
+
+</Project>
