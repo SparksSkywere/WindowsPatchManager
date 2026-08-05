@@ -93,7 +93,11 @@
 
                         <TextBlock Text="Configuration file" Style="{StaticResource SectionHeaderStyle}" Margin="0,18,0,8"/>
                         <TextBox Text="{Binding ConfigPath}" IsReadOnly="True"
-                                 TextWrapping="Wrap" Background="#FFF8F8F8"/>
+                                 TextWrapping="Wrap"
+                                 Background="{DynamicResource HeaderBackgroundBrush}"
+                                 Foreground="{DynamicResource MutedTextBrush}"
+                                 BorderBrush="{DynamicResource BorderBrushSubtle}"
+                                 CaretBrush="{DynamicResource PrimaryTextBrush}"/>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>

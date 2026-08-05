@@ -9,6 +9,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - Busy overlay shows the spinning swirl again, with **progress % underneath in smaller text** (instead of replacing the spinner).
+- Options **Configuration file** path box no longer stuck in light mode (`#FFF8F8F8`); uses theme brushes for dark/era themes.
 
 ---
 

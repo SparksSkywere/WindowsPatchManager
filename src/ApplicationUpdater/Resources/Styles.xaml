@@ -281,6 +281,13 @@
         <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}"/>
         <Setter Property="CaretBrush" Value="{DynamicResource PrimaryTextBrush}"/>
         <Setter Property="SelectionBrush" Value="{DynamicResource ListSelectionBrush}"/>
+        <Style.Triggers>
+            <!-- Read-only fields (e.g. config path) stay themed, not forced white -->
+            <Trigger Property="IsReadOnly" Value="True">
+                <Setter Property="Background" Value="{DynamicResource HeaderBackgroundBrush}"/>
+                <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
+            </Trigger>
+        </Style.Triggers>
     </Style>
 
     <Style TargetType="PasswordBox">
