@@ -8,6 +8,8 @@
         Height="720" Width="1100"
         MinHeight="520" MinWidth="860"
         WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource WindowBackgroundBrush}"
+        Foreground="{DynamicResource PrimaryTextBrush}"
         Icon="pack://application:,,,/Assets/app.ico">
 
     <Window.InputBindings>
@@ -16,9 +18,14 @@
         <KeyBinding Key="S" Modifiers="Control" Command="{Binding ExportCommand}"/>
         <KeyBinding Key="A" Modifiers="Control" Command="{Binding SelectAllCommand}"/>
         <KeyBinding Key="Escape" Command="{Binding CancelCommand}"/>
+        <KeyBinding Key="C" Modifiers="Control" Command="ApplicationCommands.Copy"/>
     </Window.InputBindings>
 
-    <DockPanel>
+    <Window.CommandBindings>
+        <CommandBinding Command="ApplicationCommands.Copy" Executed="CopyCommand_Executed" CanExecute="CopyCommand_CanExecute"/>
+    </Window.CommandBindings>
+
+    <DockPanel Background="{DynamicResource WindowBackgroundBrush}">
         <!-- Menu bar (Windows standard) -->
         <Menu DockPanel.Dock="Top">
             <MenuItem Header="_File">
@@ -44,31 +51,40 @@
                 <MenuItem Header="_Update selected" Command="{Binding UpdateSelectedCommand}"/>
                 <MenuItem Header="Update _all available" Command="{Binding UpdateAllCommand}"/>
                 <Separator/>
+                <MenuItem Header="Show update _history" Command="{Binding ShowUpdateHistoryCommand}"
+                          ToolTip="Drivers / Windows Updates tabs: show installed update history"/>
+                <MenuItem Header="_Back to available updates" Command="{Binding BackToAvailableUpdatesCommand}"/>
+                <Separator/>
                 <MenuItem Header="Create daily schedule..." Command="{Binding CreateScheduleCommand}"/>
                 <MenuItem Header="Remove schedule" Command="{Binding RemoveScheduleCommand}"/>
                 <Separator/>
                 <MenuItem Header="_Options..." Click="Options_Click"/>
             </MenuItem>
             <MenuItem Header="_Help">
+                <MenuItem Header="Send _feedback on GitHub…" Click="Feedback_Click"
+                          ToolTip="Open the GitHub Issues page to report bugs or request features"/>
+                <MenuItem Header="Open Git_Hub repository…" Click="GitHub_Click"/>
+                <MenuItem Header="View _releases…" Click="Releases_Click"/>
+                <Separator/>
                 <MenuItem Header="_About Windows Patch Manager" Click="About_Click"/>
             </MenuItem>
         </Menu>
 
         <!-- Toolbar -->
-        <Border DockPanel.Dock="Top" Background="{StaticResource PanelBackgroundBrush}"
-                BorderBrush="{StaticResource BorderBrushSubtle}" BorderThickness="0,0,0,1" Padding="6,4">
+        <Border DockPanel.Dock="Top" Background="{DynamicResource PanelBackgroundBrush}"
+                BorderBrush="{DynamicResource BorderBrushSubtle}" BorderThickness="0,0,0,1" Padding="6,4">
             <DockPanel>
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
                     <Button Content="Scan" Style="{StaticResource ToolbarButtonStyle}"
                             Command="{Binding ScanCommand}" ToolTip="Scan installed programs (F5)"/>
                     <Button Content="Check updates" Style="{StaticResource PrimaryButtonStyle}"
                             Command="{Binding CheckUpdatesCommand}" ToolTip="Check for available updates (F6)"/>
-                    <Rectangle Width="1" Fill="{StaticResource BorderBrushSubtle}" Margin="8,4"/>
+                    <Rectangle Width="1" Fill="{DynamicResource BorderBrushSubtle}" Margin="8,4"/>
                     <Button Content="Update selected" Style="{StaticResource ToolbarButtonStyle}"
                             Command="{Binding UpdateSelectedCommand}" ToolTip="Install updates for selected programs"/>
                     <Button Content="Update all" Style="{StaticResource ToolbarButtonStyle}"
                             Command="{Binding UpdateAllCommand}" ToolTip="Install all available updates"/>
-                    <Rectangle Width="1" Fill="{StaticResource BorderBrushSubtle}" Margin="8,4"/>
+                    <Rectangle Width="1" Fill="{DynamicResource BorderBrushSubtle}" Margin="8,4"/>
                     <Button Content="Options" Style="{StaticResource ToolbarButtonStyle}"
                             Click="Options_Click" ToolTip="Open settings"/>
                 </StackPanel>
@@ -86,17 +102,46 @@
         <!-- Status bar -->
         <StatusBar DockPanel.Dock="Bottom">
             <StatusBarItem>
-                <TextBlock Text="{Binding StatusText}" MinWidth="280"/>
+                <StackPanel Orientation="Horizontal">
+                    <!-- Compact spinner in status bar -->
+                    <Grid Width="16" Height="16" Margin="0,0,8,0"
+                          Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}}">
+                        <Ellipse Width="14" Height="14" Stroke="{DynamicResource AccentBrush}" StrokeThickness="2"
+                                 StrokeDashArray="2.5 1.5" RenderTransformOrigin="0.5,0.5">
+                            <Ellipse.RenderTransform>
+                                <RotateTransform x:Name="StatusSpinnerRotate"/>
+                            </Ellipse.RenderTransform>
+                            <Ellipse.Triggers>
+                                <EventTrigger RoutedEvent="Loaded">
+                                    <BeginStoryboard>
+                                        <Storyboard RepeatBehavior="Forever">
+                                            <DoubleAnimation Storyboard.TargetProperty="(Ellipse.RenderTransform).(RotateTransform.Angle)"
+                                                             From="0" To="360" Duration="0:0:0.9"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </EventTrigger>
+                            </Ellipse.Triggers>
+                        </Ellipse>
+                    </Grid>
+                    <TextBlock Text="{Binding StatusText}" MinWidth="220" VerticalAlignment="Center"/>
+                </StackPanel>
             </StatusBarItem>
             <Separator/>
             <StatusBarItem>
                 <TextBlock Text="{Binding SummaryText}" Style="{StaticResource MutedTextStyle}"/>
             </StatusBarItem>
             <StatusBarItem HorizontalAlignment="Right">
-                <ProgressBar Width="160" Height="14"
-                             Minimum="0" Maximum="100"
-                             Value="{Binding ProgressValue}"
-                             IsIndeterminate="{Binding IsProgressIndeterminate}"/>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="{Binding ProgressPercentText}"
+                               MinWidth="36" Margin="0,0,8,0"
+                               VerticalAlignment="Center" FontWeight="SemiBold"
+                               Foreground="{DynamicResource AccentBrush}"
+                               Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}}"/>
+                    <ProgressBar Width="160" Height="14"
+                                 Minimum="0" Maximum="100"
+                                 Value="{Binding ProgressValue}"
+                                 IsIndeterminate="{Binding IsProgressIndeterminate}"/>
+                </StackPanel>
             </StatusBarItem>
             <StatusBarItem HorizontalAlignment="Right">
                 <Button Content="Cancel" Padding="8,1" Margin="6,0,0,0"
@@ -105,108 +150,255 @@
             </StatusBarItem>
         </StatusBar>
 
-        <!-- Main content -->
-        <Grid Margin="10">
+        <!-- Main content — explicit window background so dark mode fills toolbar strips -->
+        <Grid Margin="0" Background="{DynamicResource WindowBackgroundBrush}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="180"/>
             </Grid.RowDefinitions>
 
-            <DockPanel Grid.Row="0" Margin="0,0,0,8">
-                <StackPanel Orientation="Horizontal">
-                    <Button Content="Select all" Style="{StaticResource ToolbarButtonStyle}" Command="{Binding SelectAllCommand}"/>
-                    <Button Content="Select none" Style="{StaticResource ToolbarButtonStyle}" Command="{Binding SelectNoneCommand}"/>
-                    <Button Content="Select updates" Style="{StaticResource ToolbarButtonStyle}" Command="{Binding SelectUpdatesOnlyCommand}"/>
-                    <CheckBox Content="Show updates only" Margin="12,0,0,0"
-                              IsChecked="{Binding ShowUpdatesOnly}" VerticalAlignment="Center"/>
-                </StackPanel>
-                <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right"
-                           VerticalAlignment="Center"
-                           Text="{Binding UpdateCount, StringFormat={}{0} update(s) available}"
-                           FontWeight="SemiBold"
-                           Foreground="{StaticResource AccentBrush}"/>
-            </DockPanel>
-
-            <Border Grid.Row="1" Background="{StaticResource PanelBackgroundBrush}"
-                    BorderBrush="{StaticResource BorderBrushSubtle}" BorderThickness="1" CornerRadius="2">
-                <ListView x:Name="ProgramList"
-                          ItemsSource="{Binding ProgramsView}"
-                          BorderThickness="0"
-                          AlternationCount="2"
-                          VirtualizingPanel.IsVirtualizing="True"
-                          VirtualizingPanel.VirtualizationMode="Recycling">
-                    <ListView.Resources>
-                        <Style TargetType="ListViewItem">
-                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                            <Setter Property="Padding" Value="4,3"/>
-                            <Style.Triggers>
-                                <Trigger Property="ItemsControl.AlternationIndex" Value="1">
-                                    <Setter Property="Background" Value="#FFF7F7F7"/>
-                                </Trigger>
-                            </Style.Triggers>
-                        </Style>
-                    </ListView.Resources>
-                    <ListView.View>
-                        <GridView>
-                            <GridViewColumn Width="36">
-                                <GridViewColumn.Header>
-                                    <TextBlock Text="" ToolTip="Select"/>
-                                </GridViewColumn.Header>
-                                <GridViewColumn.CellTemplate>
-                                    <DataTemplate>
-                                        <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                  HorizontalAlignment="Center"/>
-                                    </DataTemplate>
-                                </GridViewColumn.CellTemplate>
-                            </GridViewColumn>
-                            <GridViewColumn Header="Program" Width="280">
-                                <GridViewColumn.CellTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="{Binding Name}"
-                                                   FontWeight="{Binding UpdateAvailable, Converter={StaticResource BoolToBold}}"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   ToolTip="{Binding Name}"/>
-                                    </DataTemplate>
-                                </GridViewColumn.CellTemplate>
-                            </GridViewColumn>
-                            <GridViewColumn Header="Current" Width="110" DisplayMemberBinding="{Binding Version}"/>
-                            <GridViewColumn Header="Status" Width="120">
-                                <GridViewColumn.CellTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="{Binding UpdateStatus}"
-                                                   Foreground="{Binding UpdateAvailable, Converter={StaticResource UpdateStatusBrush}}"
-                                                   FontWeight="{Binding UpdateAvailable, Converter={StaticResource BoolToBold}}"/>
-                                    </DataTemplate>
-                                </GridViewColumn.CellTemplate>
-                            </GridViewColumn>
-                            <GridViewColumn Header="Available" Width="110" DisplayMemberBinding="{Binding AvailableVersion}"/>
-                            <GridViewColumn Header="Source" Width="90" DisplayMemberBinding="{Binding Source}"/>
-                            <GridViewColumn Header="Package ID" Width="200">
-                                <GridViewColumn.CellTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="{Binding PackageId}"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   ToolTip="{Binding PackageId}"
-                                                   Style="{StaticResource MutedTextStyle}"/>
-                                    </DataTemplate>
-                                </GridViewColumn.CellTemplate>
-                            </GridViewColumn>
-                            <GridViewColumn Header="Publisher" Width="160">
-                                <GridViewColumn.CellTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="{Binding Publisher}"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   ToolTip="{Binding Publisher}"/>
-                                    </DataTemplate>
-                                </GridViewColumn.CellTemplate>
-                            </GridViewColumn>
-                        </GridView>
-                    </ListView.View>
-                </ListView>
+            <Border Grid.Row="0"
+                    Background="{DynamicResource WindowBackgroundBrush}"
+                    Padding="10,8,10,8"
+                    BorderBrush="{DynamicResource BorderBrushSubtle}"
+                    BorderThickness="0,0,0,1">
+                <DockPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="Select all" Style="{StaticResource ToolbarButtonStyle}" Command="{Binding SelectAllCommand}"/>
+                        <Button Content="Select none" Style="{StaticResource ToolbarButtonStyle}" Command="{Binding SelectNoneCommand}"/>
+                        <Button Content="Select updates" Style="{StaticResource ToolbarButtonStyle}" Command="{Binding SelectUpdatesOnlyCommand}"/>
+                        <CheckBox Content="Show updates only" Margin="12,0,0,0"
+                                  IsChecked="{Binding ShowUpdatesOnly}" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right"
+                               VerticalAlignment="Center"
+                               Text="{Binding UpdateCount, StringFormat={}{0} update(s) available}"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource AccentBrush}"/>
+                </DockPanel>
             </Border>
 
-            <GroupBox Grid.Row="2" Header="Activity log" Margin="0,10,0,0">
+            <DockPanel Grid.Row="1" Margin="10,8,10,0" Background="{DynamicResource WindowBackgroundBrush}">
+                <TabControl DockPanel.Dock="Top"
+                            SelectedIndex="{Binding SelectedTabIndex}"
+                            Margin="0,0,0,6"
+                            Background="{DynamicResource WindowBackgroundBrush}"
+                            BorderThickness="0">
+                    <TabItem Header="Programs (winget / Chocolatey / GitHub)"/>
+                    <TabItem Header="Drivers"/>
+                    <TabItem Header="Windows Updates / CVE"/>
+                </TabControl>
+
+                <Border Background="{DynamicResource PanelBackgroundBrush}"
+                        BorderBrush="{DynamicResource BorderBrushSubtle}" BorderThickness="1" CornerRadius="2">
+                    <Grid>
+                        <ListView x:Name="ProgramList"
+                                  ItemsSource="{Binding ActiveView}"
+                                  BorderThickness="0"
+                                  AlternationCount="2"
+                                  SelectionMode="Extended"
+                                  VirtualizingPanel.IsVirtualizing="True"
+                                  VirtualizingPanel.VirtualizationMode="Recycling"
+                                  GridViewColumnHeader.Click="ProgramList_ColumnHeader_Click"
+                                  PreviewMouseRightButtonDown="ProgramList_PreviewMouseRightButtonDown"
+                                  ContextMenuOpening="ProgramList_ContextMenuOpening">
+                            <ListView.Resources>
+                                <Style TargetType="ListViewItem" BasedOn="{StaticResource ProgramListViewItemStyle}"/>
+                            </ListView.Resources>
+                            <ListView.ContextMenu>
+                                <ContextMenu x:Name="ProgramContextMenu">
+                                    <MenuItem Header="Install specific version…" Click="InstallSpecificVersion_Click"
+                                              ToolTip="Choose a published version to install (upgrade or downgrade)"/>
+                                    <MenuItem Header="Exclude from updates" Click="ExcludeProgram_Click"/>
+                                    <Separator/>
+                                    <MenuItem x:Name="CopyCellMenuItem" Header="Copy cell" Click="CopyCell_Click"/>
+                                    <Separator/>
+                                    <MenuItem Header="Copy Package ID" Click="CopyPackageId_Click"/>
+                                    <MenuItem Header="Copy name" Click="CopyName_Click"/>
+                                    <MenuItem Header="Copy Current version" Click="CopyVersion_Click"/>
+                                    <MenuItem Header="Copy Available version" Click="CopyAvailable_Click"/>
+                                    <MenuItem Header="Copy Source" Click="CopySource_Click"/>
+                                    <MenuItem Header="Copy Publisher" Click="CopyPublisher_Click"/>
+                                    <Separator/>
+                                    <MenuItem Header="Copy row (tab-separated)" Click="CopyRow_Click"/>
+                                </ContextMenu>
+                            </ListView.ContextMenu>
+                            <ListView.View>
+                                <GridView ColumnHeaderContainerStyle="{StaticResource ThemedGridViewColumnHeader}">
+                                    <GridViewColumn Width="36">
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                          HorizontalAlignment="Center"/>
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+                                    <GridViewColumn Header="Name" Width="250">
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Name}"
+                                                           Foreground="{DynamicResource PrimaryTextBrush}"
+                                                           FontWeight="{Binding UpdateAvailable, Converter={StaticResource BoolToBold}}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           ToolTip="{Binding Name}"/>
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+                                    <GridViewColumn Header="Current" Width="100">
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Version}" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+                                    <GridViewColumn Header="Available" Width="100">
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding AvailableVersion}" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+                                    <GridViewColumn Header="Status" Width="110">
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding UpdateStatus}"
+                                                           Foreground="{Binding UpdateAvailable, Converter={StaticResource UpdateStatusBrush}}"
+                                                           FontWeight="{Binding UpdateAvailable, Converter={StaticResource BoolToBold}}"/>
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+                                    <GridViewColumn Header="Progress" Width="130">
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <Grid MinHeight="16">
+                                                    <ProgressBar Minimum="0" Maximum="100" Height="14"
+                                                                 Value="{Binding ProgressPercent, Converter={StaticResource ProgressValue}}"
+                                                                 Visibility="{Binding ProgressPercent, Converter={StaticResource ProgressBarVisibility}}"/>
+                                                    <TextBlock Text="{Binding ProgressText}"
+                                                               FontSize="11"
+                                                               Foreground="{DynamicResource PrimaryTextBrush}"
+                                                               HorizontalAlignment="Center"
+                                                               VerticalAlignment="Center"/>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+                                    <GridViewColumn Header="Last updated" Width="120">
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding LastUpdated}" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+                                    <GridViewColumn Header="Source" Width="100">
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Source}" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+                                    <GridViewColumn Header="Package / ID" Width="170">
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding PackageId}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           ToolTip="{Binding PackageId}"
+                                                           Style="{StaticResource MutedTextStyle}"/>
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+                                    <GridViewColumn Header="Publisher" Width="140">
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Publisher}"
+                                                           Foreground="{DynamicResource PrimaryTextBrush}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           ToolTip="{Binding Publisher}"/>
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+                                </GridView>
+                            </ListView.View>
+                        </ListView>
+
+                        <!-- Empty state: no updates + history button on Drivers / Windows Update tabs -->
+                        <Border Background="{DynamicResource PanelBackgroundBrush}"
+                                Visibility="{Binding ShowEmptyState, Converter={StaticResource BoolToVisibility}}"
+                                IsHitTestVisible="True">
+                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="440">
+                                <TextBlock Text="{Binding EmptyStateTitle}"
+                                           FontSize="18" FontWeight="SemiBold"
+                                           HorizontalAlignment="Center"
+                                           TextAlignment="Center"
+                                           Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                <TextBlock Text="{Binding EmptyStateDetail}"
+                                           Margin="0,10,0,0"
+                                           TextAlignment="Center"
+                                           TextWrapping="Wrap"
+                                           HorizontalAlignment="Center"
+                                           Style="{StaticResource MutedTextStyle}"/>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,18,0,0">
+                                    <Button Content="Show update history"
+                                            Style="{StaticResource PrimaryButtonStyle}"
+                                            Command="{Binding ShowUpdateHistoryCommand}"
+                                            Visibility="{Binding ShowHistoryButton, Converter={StaticResource BoolToVisibility}}"
+                                            ToolTip="Browse successfully installed updates from Windows Update history"/>
+                                    <Button Content="Scan again" Margin="10,0,0,0"
+                                            Style="{StaticResource ToolbarButtonStyle}"
+                                            Command="{Binding ScanCommand}"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- History mode banner -->
+                        <Border VerticalAlignment="Top" HorizontalAlignment="Stretch"
+                                Background="{DynamicResource HeaderBackgroundBrush}"
+                                BorderBrush="{DynamicResource BorderBrushSubtle}"
+                                BorderThickness="0,0,0,1"
+                                Padding="10,6"
+                                Visibility="{Binding IsShowingHistory, Converter={StaticResource BoolToVisibility}}">
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right"
+                                        Content="Back to available updates"
+                                        Style="{StaticResource ToolbarButtonStyle}"
+                                        Command="{Binding BackToAvailableUpdatesCommand}"/>
+                                <TextBlock Text="Showing installed update history (not pending updates)"
+                                           VerticalAlignment="Center"
+                                           Foreground="{DynamicResource PrimaryTextBrush}"/>
+                            </DockPanel>
+                        </Border>
+
+                        <Border Background="{DynamicResource BusyOverlayBrush}"
+                                Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}}"
+                                IsHitTestVisible="True">
+                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                <TextBlock Text="{Binding ProgressPercentText}"
+                                           FontSize="28" FontWeight="SemiBold"
+                                           HorizontalAlignment="Center"
+                                           Foreground="{DynamicResource AccentBrush}"/>
+                                <TextBlock Text="{Binding BusyOverlayText}"
+                                           Margin="0,10,0,0"
+                                           TextAlignment="Center"
+                                           TextWrapping="Wrap"
+                                           MaxWidth="480"
+                                           HorizontalAlignment="Center"/>
+                                <ProgressBar Width="300" Height="16" Margin="0,14,0,0"
+                                             Minimum="0" Maximum="100"
+                                             Value="{Binding ProgressValue}"
+                                             IsIndeterminate="{Binding IsProgressIndeterminate}"/>
+                                <TextBlock Text="Overall progress. Per-item progress is in the Progress column."
+                                           Margin="0,10,0,0"
+                                           Style="{StaticResource MutedTextStyle}"
+                                           HorizontalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </Border>
+            </DockPanel>
+
+            <GroupBox Grid.Row="2" Header="Activity log" Margin="10,10,10,10"
+                      Background="{DynamicResource PanelBackgroundBrush}">
                 <DockPanel>
                     <Button DockPanel.Dock="Top" HorizontalAlignment="Right"
                             Content="Clear" Padding="8,2" Margin="0,0,0,4"

@@ -96,18 +96,189 @@ public sealed class WingetService
                 AvailableVersion = string.IsNullOrWhiteSpace(available) ? string.Empty : available.Trim()
             };
 
+            // Do NOT mark UpdateAvailable from "winget list" Available column.
+            // That column is often stale (e.g. WindowsAppRuntime) and disagrees with
+            // "winget upgrade". Official update status comes only from ListUpgradesAsync.
             if (!string.IsNullOrWhiteSpace(program.AvailableVersion) &&
-                program.AvailableVersion is not ("Unknown" or "-" or "—"))
+                program.AvailableVersion is ("Unknown" or "-" or "—"))
             {
-                var newer = VersionComparer.IsNewer(program.Version, program.AvailableVersion);
-                program.UpdateAvailable = newer != false;
+                program.AvailableVersion = string.Empty;
             }
 
+            program.UpdateAvailable = false;
             programs.Add(program);
         }
 
-        _log.Info($"winget list returned {programs.Count} packages.");
+        _log.Info($"winget list returned {programs.Count} packages (update flags deferred until Check updates).");
         return programs;
+    }
+
+    /// <summary>
+    /// Lists published versions for a package (winget show --versions), newest first.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> ListAvailableVersionsAsync(
+        string packageId,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(packageId) || !await IsAvailableAsync(ct).ConfigureAwait(false))
+            return [];
+
+        var result = await ProcessRunner.RunAsync(
+            "winget",
+            [
+                "show",
+                "--id", packageId.Trim(),
+                "--exact",
+                "--versions",
+                "--accept-source-agreements",
+                "--disable-interactivity"
+            ],
+            ct,
+            timeoutSeconds: 90).ConfigureAwait(false);
+
+        var text = string.IsNullOrWhiteSpace(result.StdOut) ? result.StdErr : result.StdOut;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            _log.Warn($"winget show --versions failed for {packageId}: {result.StdErr}");
+            return [];
+        }
+
+        var versions = new List<string>();
+        var pastHeader = false;
+        foreach (var raw in text.Replace("\r\n", "\n").Split('\n'))
+        {
+            var line = raw.Trim();
+            if (string.IsNullOrEmpty(line))
+                continue;
+
+            if (!pastHeader)
+            {
+                // Header row is typically just "Version" followed by a dashed separator.
+                if (line.Equals("Version", StringComparison.OrdinalIgnoreCase))
+                {
+                    pastHeader = true;
+                    continue;
+                }
+
+                if (line.Length > 2 && line.All(ch => ch is '-' or '=' or '─' or '━' or ' '))
+                {
+                    pastHeader = true;
+                    continue;
+                }
+
+                continue;
+            }
+
+            if (line.Length > 2 && line.All(ch => ch is '-' or '=' or '─' or '━' or ' '))
+                continue;
+            if (line.StartsWith("Found ", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (line.Contains("http://", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("https://", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            // First token is the version
+            var ver = line.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)[0];
+            if (string.IsNullOrWhiteSpace(ver) || ver.Equals("Version", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (!versions.Contains(ver, StringComparer.OrdinalIgnoreCase))
+                versions.Add(ver);
+        }
+
+        _log.Info($"winget listed {versions.Count} version(s) for {packageId}.");
+        return versions;
+    }
+
+    /// <summary>
+    /// Installs a specific package version (supports downgrade via --force).
+    /// </summary>
+    public async Task<UpdateResult> InstallVersionAsync(
+        ProgramInfo program,
+        string version,
+        CancellationToken ct = default)
+    {
+        var result = new UpdateResult
+        {
+            Program = program,
+            StartTime = DateTime.Now
+        };
+
+        if (string.IsNullOrWhiteSpace(program.PackageId))
+        {
+            result.Success = false;
+            result.ErrorMessage = "No winget package ID.";
+            result.EndTime = DateTime.Now;
+            return result;
+        }
+
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            result.Success = false;
+            result.ErrorMessage = "No version selected.";
+            result.EndTime = DateTime.Now;
+            return result;
+        }
+
+        _log.Info($"Installing {program.Name} ({program.PackageId}) version {version} via winget...");
+
+        var args = new List<string>
+        {
+            "install",
+            "--id", program.PackageId,
+            "--exact",
+            "--version", version.Trim(),
+            "--force", // required for side-by-side / downgrade when a different version is present
+            "--accept-source-agreements",
+            "--accept-package-agreements"
+        };
+
+        if (_config.Config.UpdateBehavior.Silent)
+        {
+            args.Add("--disable-interactivity");
+            args.Add("--silent");
+        }
+        else
+        {
+            args.Add("--interactive");
+        }
+
+        var attempts = new[]
+        {
+            new ProcessRunOptions { TimeoutSeconds = 1800, ShowWindow = !_config.Config.UpdateBehavior.Silent, Elevate = false },
+            new ProcessRunOptions { TimeoutSeconds = 1800, ShowWindow = true, Elevate = true }
+        };
+
+        ProcessResult? last = null;
+        foreach (var options in attempts)
+        {
+            ct.ThrowIfCancellationRequested();
+            last = await ProcessRunner.RunAsync("winget", args, options, ct).ConfigureAwait(false);
+            result.Output = string.IsNullOrWhiteSpace(result.Output)
+                ? last.CombinedOutput
+                : result.Output + "\n\n" + last.CombinedOutput;
+
+            if (IsSuccessful(last))
+            {
+                result.Success = true;
+                program.Version = version.Trim();
+                program.AvailableVersion = string.Empty;
+                program.UpdateAvailable = false;
+                program.LastUpdated = DateTime.Now;
+                result.EndTime = DateTime.Now;
+                _log.Success($"Installed {program.Name} version {version}");
+                return result;
+            }
+
+            if (last.StdErr.Contains("cancelled", StringComparison.OrdinalIgnoreCase) ||
+                last.CombinedOutput.Contains("cancelled", StringComparison.OrdinalIgnoreCase))
+                break;
+        }
+
+        result.Success = false;
+        result.ErrorMessage = ExtractError(last) ?? "winget install failed.";
+        result.EndTime = DateTime.Now;
+        _log.Error($"Failed to install {program.Name} v{version}: {result.ErrorMessage}");
+        return result;
     }
 
     public async Task<IReadOnlyList<ProgramInfo>> ListUpgradesAsync(CancellationToken ct = default)
@@ -381,7 +552,7 @@ public sealed class WingetService
         return args;
     }
 
-    private static List<string> BuildInstallArgs(ProgramInfo program, bool force, bool interactive)
+    private static List<string> BuildInstallArgs(ProgramInfo program, bool force, bool interactive, string? version = null)
     {
         var args = new List<string>
         {
@@ -391,6 +562,12 @@ public sealed class WingetService
             "--accept-source-agreements",
             "--accept-package-agreements"
         };
+
+        if (!string.IsNullOrWhiteSpace(version))
+        {
+            args.Add("--version");
+            args.Add(version.Trim());
+        }
 
         if (interactive)
             args.Add("--interactive");

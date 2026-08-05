@@ -20,6 +20,13 @@ public static class AppInfo
     public const string CompanyFolderName = "Skywere Industries";
     public const string ScheduledTaskName = "Windows Patch Manager";
 
+    /// <summary>Public repo for feedback, issues, and releases.</summary>
+    public const string GitHubOwner = "SparksSkywere";
+    public const string GitHubRepo = "WindowsPatchManager";
+    public const string GitHubUrl = "https://github.com/SparksSkywere/WindowsPatchManager";
+    public const string GitHubIssuesUrl = "https://github.com/SparksSkywere/WindowsPatchManager/issues";
+    public const string GitHubReleasesUrl = "https://github.com/SparksSkywere/WindowsPatchManager/releases";
+
     public static string Version
     {
         get

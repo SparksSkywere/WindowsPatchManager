@@ -23,8 +23,14 @@ public sealed class ScanProgress
 public sealed class UpdateProgress
 {
     public string ProgramName { get; init; } = string.Empty;
+    public string? ProgramKey { get; init; }
     public bool Success { get; init; }
     public int Completed { get; init; }
     public int Total { get; init; }
+    /// <summary>Overall batch percent 0-100, or -1 unknown.</summary>
+    public int OverallPercent { get; init; } = -1;
+    /// <summary>Per-item percent 0-100 while that item is running.</summary>
+    public int ItemPercent { get; init; } = -1;
     public string? Message { get; init; }
+    public bool IsStarting { get; init; }
 }

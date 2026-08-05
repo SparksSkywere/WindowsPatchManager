@@ -112,4 +112,36 @@ public sealed class ConfigService
 
         return false;
     }
+
+    /// <summary>
+    /// Adds the program name and package ID (when present) to exclusions and saves config.
+    /// Returns true if anything new was added.
+    /// </summary>
+    public bool ExcludeProgram(ProgramInfo program)
+    {
+        if (program is null)
+            return false;
+
+        var excl = _config.Exclusions;
+        var added = false;
+
+        if (!string.IsNullOrWhiteSpace(program.Name) &&
+            !excl.Programs.Any(p => p.Equals(program.Name, StringComparison.OrdinalIgnoreCase)))
+        {
+            excl.Programs.Add(program.Name.Trim());
+            added = true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(program.PackageId) &&
+            !excl.PackageIds.Any(p => p.Equals(program.PackageId, StringComparison.OrdinalIgnoreCase)))
+        {
+            excl.PackageIds.Add(program.PackageId.Trim());
+            added = true;
+        }
+
+        if (added)
+            Save();
+
+        return added;
+    }
 }

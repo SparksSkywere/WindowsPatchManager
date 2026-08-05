@@ -20,8 +20,13 @@ public partial class MainViewModel : ObservableObject
     private CancellationTokenSource? _cts;
 
     public ObservableCollection<ProgramItemViewModel> Programs { get; } = [];
+    public ObservableCollection<ProgramItemViewModel> Drivers { get; } = [];
+    public ObservableCollection<ProgramItemViewModel> WindowsUpdates { get; } = [];
     public ObservableCollection<string> LogEntries { get; } = [];
+
     public ICollectionView ProgramsView { get; }
+    public ICollectionView DriversView { get; }
+    public ICollectionView WindowsUpdatesView { get; }
 
     [ObservableProperty] private string _statusText = "Ready";
     [ObservableProperty] private string _searchText = string.Empty;
@@ -29,10 +34,18 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private double _progressValue;
     [ObservableProperty] private bool _isProgressIndeterminate;
+    [ObservableProperty] private string _progressPercentText = string.Empty;
+    [ObservableProperty] private string _busyOverlayText = "Working…";
     [ObservableProperty] private int _totalCount;
     [ObservableProperty] private int _updateCount;
     [ObservableProperty] private int _selectedCount;
     [ObservableProperty] private string _summaryText = "No programs loaded";
+    [ObservableProperty] private int _selectedTabIndex;
+    [ObservableProperty] private bool _isShowingHistory;
+    [ObservableProperty] private bool _showEmptyState;
+    [ObservableProperty] private string _emptyStateTitle = "No updates available";
+    [ObservableProperty] private string _emptyStateDetail = "Run Scan or Check updates to search again.";
+    [ObservableProperty] private bool _showHistoryButton;
 
     public MainViewModel(PatchManagerService patchManager, SchedulerService scheduler, LogService log)
     {
@@ -45,7 +58,15 @@ public partial class MainViewModel : ObservableObject
         ProgramsView.SortDescriptions.Add(new SortDescription(nameof(ProgramItemViewModel.UpdateAvailable), ListSortDirection.Descending));
         ProgramsView.SortDescriptions.Add(new SortDescription(nameof(ProgramItemViewModel.Name), ListSortDirection.Ascending));
 
-        // UI-owned log list — always append on the dispatcher
+        DriversView = CollectionViewSource.GetDefaultView(Drivers);
+        DriversView.Filter = FilterProgram;
+        DriversView.SortDescriptions.Add(new SortDescription(nameof(ProgramItemViewModel.UpdateAvailable), ListSortDirection.Descending));
+        DriversView.SortDescriptions.Add(new SortDescription(nameof(ProgramItemViewModel.Name), ListSortDirection.Ascending));
+
+        WindowsUpdatesView = CollectionViewSource.GetDefaultView(WindowsUpdates);
+        WindowsUpdatesView.Filter = FilterProgram;
+        WindowsUpdatesView.SortDescriptions.Add(new SortDescription(nameof(ProgramItemViewModel.Name), ListSortDirection.Ascending));
+
         _log.MessageLogged += (_, line) => UiThread.Post(() =>
         {
             LogEntries.Add(line);
@@ -54,8 +75,28 @@ public partial class MainViewModel : ObservableObject
         });
     }
 
+    private ObservableCollection<ProgramItemViewModel> ActiveList => SelectedTabIndex switch
+    {
+        1 => Drivers,
+        2 => WindowsUpdates,
+        _ => Programs
+    };
+
+    /// <summary>Bound list for the selected tab (Programs / Drivers / Windows Updates).</summary>
+    public ICollectionView ActiveView => SelectedTabIndex switch
+    {
+        1 => DriversView,
+        2 => WindowsUpdatesView,
+        _ => ProgramsView
+    };
+
     partial void OnSearchTextChanged(string value) =>
-        UiThread.Post(() => ProgramsView.Refresh());
+        UiThread.Post(() =>
+        {
+            ProgramsView.Refresh();
+            DriversView.Refresh();
+            WindowsUpdatesView.Refresh();
+        });
 
     partial void OnShowUpdatesOnlyChanged(bool value)
     {
@@ -64,9 +105,20 @@ public partial class MainViewModel : ObservableObject
         UiThread.Post(() =>
         {
             ProgramsView.Refresh();
+            DriversView.Refresh();
+            WindowsUpdatesView.Refresh();
             RefreshSummary();
         });
     }
+
+    partial void OnSelectedTabIndexChanged(int value) =>
+        UiThread.Post(() =>
+        {
+            IsShowingHistory = false;
+            OnPropertyChanged(nameof(ActiveView));
+            RefreshSummary();
+            UpdateEmptyState();
+        });
 
     private bool FilterProgram(object obj)
     {
@@ -83,7 +135,8 @@ public partial class MainViewModel : ObservableObject
         return item.Name.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                item.PackageId.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                item.Publisher.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-               item.Source.Contains(q, StringComparison.OrdinalIgnoreCase);
+               item.Source.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+               item.AvailableVersion.Contains(q, StringComparison.OrdinalIgnoreCase);
     }
 
     [RelayCommand]
@@ -99,50 +152,112 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanRun))]
     private async Task ScanAsync()
     {
-        await RunBusyAsync("Scanning installed programs...", async (ct, progress) =>
+        IsShowingHistory = false;
+        await RunBusyAsync("Scanning…", async (ct, progress) =>
         {
-            var list = await _patchManager.ScanAsync(progress, ct).ConfigureAwait(false);
-            UiThread.Send(() => ReplacePrograms(list));
+            if (SelectedTabIndex == 1)
+            {
+                var list = await _patchManager.ScanDriversAsync(progress, ct).ConfigureAwait(false);
+                UiThread.Send(() => ReplaceList(Drivers, list));
+            }
+            else if (SelectedTabIndex == 2)
+            {
+                var list = await _patchManager.ScanWindowsUpdatesAsync(progress, ct).ConfigureAwait(false);
+                UiThread.Send(() => ReplaceList(WindowsUpdates, list));
+            }
+            else
+            {
+                var list = await _patchManager.ScanAsync(progress, ct).ConfigureAwait(false);
+                UiThread.Send(() => ReplaceList(Programs, list));
+            }
         }).ConfigureAwait(true);
     }
 
     [RelayCommand(CanExecute = nameof(CanRun))]
     private async Task CheckUpdatesAsync()
     {
-        await RunBusyAsync("Checking for updates...", async (ct, progress) =>
+        IsShowingHistory = false;
+        await RunBusyAsync("Checking for updates…", async (ct, progress) =>
         {
-            if (_patchManager.Programs.Count == 0)
+            if (SelectedTabIndex == 1)
             {
-                var scanned = await _patchManager.ScanAsync(progress, ct).ConfigureAwait(false);
-                UiThread.Send(() => ReplacePrograms(scanned));
+                var list = await _patchManager.ScanDriversAsync(progress, ct).ConfigureAwait(false);
+                UiThread.Send(() => ReplaceList(Drivers, list));
             }
+            else if (SelectedTabIndex == 2)
+            {
+                var list = await _patchManager.ScanWindowsUpdatesAsync(progress, ct).ConfigureAwait(false);
+                UiThread.Send(() => ReplaceList(WindowsUpdates, list));
+            }
+            else
+            {
+                if (_patchManager.Programs.Count == 0)
+                {
+                    var scanned = await _patchManager.ScanAsync(progress, ct).ConfigureAwait(false);
+                    UiThread.Send(() => ReplaceList(Programs, scanned));
+                }
 
-            await _patchManager.CheckUpdatesAsync(progress, ct).ConfigureAwait(false);
+                await _patchManager.CheckUpdatesAsync(progress, ct).ConfigureAwait(false);
+                UiThread.Send(() =>
+                {
+                    ReplaceList(Programs, _patchManager.Programs);
+                    if (_patchManager.Config.Config.Notifications.ShowUpdateAvailable && UpdateCount > 0)
+                        StatusText = $"{UpdateCount} update(s) available";
+                });
+            }
+        }).ConfigureAwait(true);
+    }
+
+    [RelayCommand(CanExecute = nameof(CanRun))]
+    private async Task ShowUpdateHistoryAsync()
+    {
+        // Always load history — no confirmation dialogs.
+        // If on Programs tab, open Windows Updates history by default.
+        if (SelectedTabIndex is not (1 or 2))
+            SelectedTabIndex = 2;
+
+        var driversOnly = SelectedTabIndex == 1;
+        await RunBusyAsync("Loading update history…", async (ct, progress) =>
+        {
+            var list = await _patchManager.GetUpdateHistoryAsync(driversOnly, progress, ct).ConfigureAwait(false);
             UiThread.Send(() =>
             {
-                ReplacePrograms(_patchManager.Programs);
-                if (_patchManager.Config.Config.Notifications.ShowUpdateAvailable && UpdateCount > 0)
-                    StatusText = $"{UpdateCount} update(s) available";
+                IsShowingHistory = true;
+                if (driversOnly)
+                    ReplaceList(Drivers, list);
+                else
+                    ReplaceList(WindowsUpdates, list);
+
+                StatusText = list.Count == 0
+                    ? "No installed updates found in Windows Update history"
+                    : $"Showing {list.Count} installed update(s) from history";
             });
         }).ConfigureAwait(true);
     }
 
     [RelayCommand(CanExecute = nameof(CanRun))]
+    private async Task BackToAvailableUpdatesAsync()
+    {
+        IsShowingHistory = false;
+        if (SelectedTabIndex == 1 || SelectedTabIndex == 2)
+            await CheckUpdatesAsync().ConfigureAwait(true);
+        else
+            UpdateEmptyState();
+    }
+
+    [RelayCommand(CanExecute = nameof(CanRun))]
     private async Task UpdateSelectedAsync()
     {
-        var selected = Programs.Where(p => p.IsSelected && p.UpdateAvailable).Select(p => p.Model).ToList();
+        var selected = ActiveList.Where(p => p.IsSelected && p.UpdateAvailable).Select(p => p.Model).ToList();
         if (selected.Count == 0)
         {
             MessageBox.Show(
-                "Select one or more programs that have updates available.",
+                "Select one or more items that have updates available.",
                 "Windows Patch Manager",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
             return;
         }
-
-        if (!ConfirmUpdates(selected.Count))
-            return;
 
         await RunUpdatesAsync(selected).ConfigureAwait(true);
     }
@@ -150,19 +265,16 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanRun))]
     private async Task UpdateAllAsync()
     {
-        var all = Programs.Where(p => p.UpdateAvailable).Select(p => p.Model).ToList();
+        var all = ActiveList.Where(p => p.UpdateAvailable).Select(p => p.Model).ToList();
         if (all.Count == 0)
         {
             MessageBox.Show(
-                "No updates are available. Run Check for Updates first.",
+                "No updates are available on this tab. Run Check for Updates first.",
                 "Windows Patch Manager",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
             return;
         }
-
-        if (!ConfirmUpdates(all.Count))
-            return;
 
         await RunUpdatesAsync(all).ConfigureAwait(true);
     }
@@ -170,7 +282,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void SelectAll()
     {
-        foreach (var p in Programs)
+        foreach (var p in ActiveList)
             p.IsSelected = true;
         RefreshSelectionCount();
     }
@@ -178,7 +290,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void SelectNone()
     {
-        foreach (var p in Programs)
+        foreach (var p in ActiveList)
             p.IsSelected = false;
         RefreshSelectionCount();
     }
@@ -186,7 +298,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void SelectUpdatesOnly()
     {
-        foreach (var p in Programs)
+        foreach (var p in ActiveList)
             p.IsSelected = p.UpdateAvailable;
         RefreshSelectionCount();
     }
@@ -196,9 +308,9 @@ public partial class MainViewModel : ObservableObject
     {
         var dlg = new SaveFileDialog
         {
-            Title = "Export program list",
+            Title = "Export list",
             Filter = "JSON files (*.json)|*.json|All files (*.*)|*.*",
-            FileName = $"programs_{DateTime.Now:yyyyMMdd_HHmmss}.json",
+            FileName = $"updates_{DateTime.Now:yyyyMMdd_HHmmss}.json",
             DefaultExt = ".json",
             AddExtension = true
         };
@@ -280,53 +392,82 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void RefreshSelection() => RefreshSelectionCount();
 
-    private bool CanRun() => !IsBusy;
-
-    private bool ConfirmUpdates(int count)
+    public void NotifyListChanged()
     {
-        if (!_patchManager.Config.Config.UpdateBehavior.RequireConfirmation)
-            return true;
-
-        var result = MessageBox.Show(
-            $"Install updates for {count} program(s)?\n\nSome installers may require administrator approval (UAC).",
-            "Confirm updates",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Question,
-            MessageBoxResult.No);
-
-        return result == MessageBoxResult.Yes;
+        ActiveView.Refresh();
+        RefreshSummary();
     }
+
+    private bool CanRun() => !IsBusy;
 
     private async Task RunUpdatesAsync(List<ProgramInfo> programs)
     {
-        await RunBusyAsync($"Updating {programs.Count} program(s)...", async (ct, _) =>
+        await RunBusyAsync($"Updating {programs.Count} item(s)…", async (ct, _) =>
         {
-            // Capture UI sync context for progress callbacks
             var progress = new Progress<UpdateProgress>(p =>
             {
                 UiThread.Post(() =>
                 {
-                    ProgressValue = p.Total == 0 ? 0 : (p.Completed * 100.0 / p.Total);
-                    IsProgressIndeterminate = false;
-                    StatusText = $"Updating {p.ProgramName} ({p.Completed}/{p.Total})";
-                });
+                    if (p.OverallPercent >= 0)
+                        SetDeterminateProgress(p.OverallPercent, p.Message ?? p.ProgramName);
+                    else if (p.Total > 0)
+                    {
+                        var pct = p.Completed * 100.0 / p.Total;
+                        if (p.ItemPercent >= 0)
+                            pct = (p.Completed + p.ItemPercent / 100.0) * 100.0 / p.Total;
+                        SetDeterminateProgress(pct, p.Message ?? $"Updating {p.ProgramName} ({p.Completed}/{p.Total})");
+                    }
 
-                if (p.Success)
-                    _log.Success($"Updated {p.ProgramName}");
-                else
-                    _log.Error($"Failed {p.ProgramName}: {p.Message}");
+                    BusyOverlayText = string.IsNullOrWhiteSpace(p.Message)
+                        ? $"Updating {p.ProgramName}\n{p.Completed} of {p.Total} · {ProgressPercentText}"
+                        : $"{p.ProgramName}\n{p.Message}\n{ProgressPercentText}";
+
+                    // Per-row progress cell
+                    if (!string.IsNullOrWhiteSpace(p.ProgramKey))
+                    {
+                        var row = FindRow(p.ProgramKey) ?? FindRowByName(p.ProgramName);
+                        if (row is not null)
+                        {
+                            if (p.ItemPercent >= 0)
+                                row.SetProgress(p.ItemPercent, p.Message);
+                            if (p.Completed > 0 && p.ItemPercent >= 100)
+                            {
+                                if (p.Success)
+                                    row.SetProgress(100, "Done");
+                                else if (!string.IsNullOrWhiteSpace(p.Message))
+                                    row.SetProgress(p.ItemPercent < 0 ? 0 : p.ItemPercent, p.Message);
+                            }
+                        }
+                    }
+
+                    if (!p.IsStarting && p.Completed > 0 && p.ItemPercent >= 100)
+                    {
+                        if (p.Success)
+                            _log.Success($"Updated {p.ProgramName}");
+                        else if (!string.IsNullOrWhiteSpace(p.Message))
+                            _log.Error($"Failed {p.ProgramName}: {p.Message}");
+                    }
+                });
             });
 
             var results = await _patchManager.UpdateAsync(programs, progress, ct).ConfigureAwait(false);
             var ok = results.Values.Count(r => r.Success);
             var fail = results.Count - ok;
 
-            await _patchManager.CheckUpdatesAsync(null, ct).ConfigureAwait(false);
-
             UiThread.Send(() =>
             {
+                foreach (var vm in ActiveList)
+                    vm.ClearProgress();
+
                 StatusText = $"Updates finished: {ok} succeeded, {fail} failed";
-                ReplacePrograms(_patchManager.Programs);
+
+                // Refresh active tab data
+                if (SelectedTabIndex == 0)
+                    ReplaceList(Programs, _patchManager.Programs);
+                else if (SelectedTabIndex == 1)
+                    ReplaceList(Drivers, _patchManager.Drivers);
+                else
+                    ReplaceList(WindowsUpdates, _patchManager.WindowsUpdates);
 
                 if (_patchManager.Config.Config.Notifications.ShowUpdateComplete)
                 {
@@ -340,31 +481,36 @@ public partial class MainViewModel : ObservableObject
         }).ConfigureAwait(true);
     }
 
+    private ProgramItemViewModel? FindRow(string key) =>
+        Programs.Concat(Drivers).Concat(WindowsUpdates)
+            .FirstOrDefault(p => string.Equals(p.Model.DisplayKey, key, StringComparison.OrdinalIgnoreCase));
+
+    private ProgramItemViewModel? FindRowByName(string name) =>
+        ActiveList.FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+
     private async Task RunBusyAsync(string status, Func<CancellationToken, IProgress<ScanProgress>, Task> work)
     {
         if (IsBusy) return;
 
         _cts = new CancellationTokenSource();
         IsBusy = true;
-        IsProgressIndeterminate = true;
-        ProgressValue = 0;
-        StatusText = status;
+        SetIndeterminateProgress(status);
+        BusyOverlayText = status;
         NotifyBusyCommands();
 
-        // Progress<T> captures the current (UI) SynchronizationContext when constructed here
         var progress = new Progress<ScanProgress>(p =>
         {
             UiThread.Post(() =>
             {
-                StatusText = p.Message;
                 if (p.Percent >= 0)
                 {
-                    IsProgressIndeterminate = false;
-                    ProgressValue = p.Percent;
+                    SetDeterminateProgress(p.Percent, p.Message);
+                    BusyOverlayText = $"{p.Message}\n{ProgressPercentText}";
                 }
                 else
                 {
-                    IsProgressIndeterminate = true;
+                    SetIndeterminateProgress(p.Message);
+                    BusyOverlayText = p.Message;
                 }
             });
         });
@@ -396,11 +542,30 @@ public partial class MainViewModel : ObservableObject
                 ProgressValue = 100;
             }
 
+            ProgressPercentText = ProgressValue >= 100 ? "100%" : $"{(int)Math.Round(ProgressValue)}%";
+            BusyOverlayText = "Working…";
             NotifyBusyCommands();
             _cts?.Dispose();
             _cts = null;
             RefreshSummary();
+            UpdateEmptyState();
         }
+    }
+
+    private void SetIndeterminateProgress(string status)
+    {
+        IsProgressIndeterminate = true;
+        ProgressValue = 0;
+        ProgressPercentText = "…";
+        StatusText = status;
+    }
+
+    private void SetDeterminateProgress(double percent, string status)
+    {
+        IsProgressIndeterminate = false;
+        ProgressValue = Math.Clamp(percent, 0, 100);
+        ProgressPercentText = $"{(int)Math.Round(ProgressValue)}%";
+        StatusText = status;
     }
 
     private void NotifyBusyCommands()
@@ -409,12 +574,13 @@ public partial class MainViewModel : ObservableObject
         CheckUpdatesCommand.NotifyCanExecuteChanged();
         UpdateSelectedCommand.NotifyCanExecuteChanged();
         UpdateAllCommand.NotifyCanExecuteChanged();
+        ShowUpdateHistoryCommand.NotifyCanExecuteChanged();
+        BackToAvailableUpdatesCommand.NotifyCanExecuteChanged();
     }
 
-    private void ReplacePrograms(IReadOnlyList<ProgramInfo> list)
+    private void ReplaceList(ObservableCollection<ProgramItemViewModel> target, IReadOnlyList<ProgramInfo> list)
     {
-        // Must run on UI thread (caller ensures via UiThread.Send)
-        Programs.Clear();
+        target.Clear();
         foreach (var p in list)
         {
             var vm = new ProgramItemViewModel(p);
@@ -423,25 +589,77 @@ public partial class MainViewModel : ObservableObject
                 if (e.PropertyName == nameof(ProgramItemViewModel.IsSelected))
                     RefreshSelectionCount();
             };
-            Programs.Add(vm);
+            target.Add(vm);
         }
 
-        ProgramsView.Refresh();
+        if (ReferenceEquals(target, Programs))
+            ProgramsView.Refresh();
+        else if (ReferenceEquals(target, Drivers))
+            DriversView.Refresh();
+        else
+            WindowsUpdatesView.Refresh();
+
         RefreshSummary();
+        UpdateEmptyState();
     }
 
     private void RefreshSelectionCount()
     {
-        SelectedCount = Programs.Count(p => p.IsSelected);
+        SelectedCount = ActiveList.Count(p => p.IsSelected);
+        RefreshSummary();
     }
 
     private void RefreshSummary()
     {
-        TotalCount = Programs.Count;
-        UpdateCount = Programs.Count(p => p.UpdateAvailable);
-        SelectedCount = Programs.Count(p => p.IsSelected);
-        SummaryText = $"{TotalCount} programs · {UpdateCount} update(s) available · {SelectedCount} selected";
+        TotalCount = ActiveList.Count;
+        UpdateCount = ActiveList.Count(p => p.UpdateAvailable);
+        SelectedCount = ActiveList.Count(p => p.IsSelected);
+        var tab = SelectedTabIndex switch
+        {
+            1 => IsShowingHistory ? "driver history" : "drivers",
+            2 => IsShowingHistory ? "Windows update history" : "Windows updates",
+            _ => "programs"
+        };
+        SummaryText = IsShowingHistory
+            ? $"{TotalCount} installed {tab} · history view"
+            : $"{TotalCount} {tab} · {UpdateCount} update(s) available · {SelectedCount} selected";
         if (string.IsNullOrWhiteSpace(StatusText) || StatusText is "Ready" or "Error")
             StatusText = SummaryText;
+        UpdateEmptyState();
+    }
+
+    private void UpdateEmptyState()
+    {
+        var empty = !IsBusy && ActiveList.Count == 0;
+        ShowEmptyState = empty;
+
+        if (!empty)
+        {
+            ShowHistoryButton = false;
+            return;
+        }
+
+        switch (SelectedTabIndex)
+        {
+            case 1:
+                EmptyStateTitle = IsShowingHistory ? "No driver history found" : "No driver updates available";
+                EmptyStateDetail = IsShowingHistory
+                    ? "Windows Update has no successful driver installations in history on this PC."
+                    : "Your drivers look up to date, or Windows Update returned no driver packages.\nYou can still browse installed driver updates from history.";
+                ShowHistoryButton = !IsShowingHistory;
+                break;
+            case 2:
+                EmptyStateTitle = IsShowingHistory ? "No Windows Update history found" : "No Windows updates available";
+                EmptyStateDetail = IsShowingHistory
+                    ? "Windows Update has no successful software installations in history on this PC."
+                    : "This PC has no pending Windows / CVE updates right now.\nYou can browse previously installed updates from history.";
+                ShowHistoryButton = !IsShowingHistory;
+                break;
+            default:
+                EmptyStateTitle = "No programs loaded";
+                EmptyStateDetail = "Click Scan to detect installed applications, then Check updates.";
+                ShowHistoryButton = false;
+                break;
+        }
     }
 }

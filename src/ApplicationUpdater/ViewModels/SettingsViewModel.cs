@@ -1,7 +1,9 @@
+using System.Collections.ObjectModel;
 using System.Windows;
 using ApplicationUpdater.Helpers;
 using ApplicationUpdater.Models;
 using ApplicationUpdater.Services;
+using ApplicationUpdater.Themes;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -17,7 +19,12 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _allowInstallerDesktopShortcuts;
     [ObservableProperty] private bool _wingetEnabled;
     [ObservableProperty] private bool _chocolateyEnabled;
-    [ObservableProperty] private bool _requireConfirmation;
+    [ObservableProperty] private bool _gitHubEnabled;
+    [ObservableProperty] private bool _windowsUpdateEnabled;
+    [ObservableProperty] private string _gitHubReposText = string.Empty;
+    [ObservableProperty] private string _gitHubToken = string.Empty;
+    [ObservableProperty] private bool _selfUpdateEnabled;
+    [ObservableProperty] private string _selfUpdateRepo = string.Empty;
     [ObservableProperty] private int _maxConcurrentUpdates;
     [ObservableProperty] private bool _includeUnknown;
     [ObservableProperty] private bool _includePinned;
@@ -31,6 +38,9 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _excludedPackageIdsText = string.Empty;
     [ObservableProperty] private string _configPath = string.Empty;
     [ObservableProperty] private string _shortcutStatus = string.Empty;
+    [ObservableProperty] private ThemeOption? _selectedTheme;
+
+    public ObservableCollection<ThemeOption> ThemeOptions { get; } = new(ThemeCatalog.PickerOptions);
 
     public SettingsViewModel(ConfigService config)
     {
@@ -38,16 +48,50 @@ public partial class SettingsViewModel : ObservableObject
         LoadFromConfig();
     }
 
+    private bool _loading;
+
+    /// <summary>Live-preview theme when the combo box changes (also saved on OK).</summary>
+    partial void OnSelectedThemeChanged(ThemeOption? value)
+    {
+        if (_loading || value is null) return;
+        ThemeManager.Apply(value.Id);
+    }
+
+    public void RevertThemePreview() =>
+        ThemeManager.Apply(_config.Config.General.Theme);
+
     public void LoadFromConfig()
     {
+        _loading = true;
         var c = _config.Config;
         AutoCheckUpdates = c.General.AutoCheckUpdates;
         CheckIntervalHours = c.General.CheckIntervalHours;
         CreateBackups = c.General.CreateBackups;
         AllowInstallerDesktopShortcuts = c.General.AllowInstallerDesktopShortcuts;
+        var themeId = ThemeCatalog.NormalizeId(c.General.Theme);
+        SelectedTheme = ThemeOptions.FirstOrDefault(t => t.Id == themeId)
+                        ?? ThemeOptions.First();
         WingetEnabled = c.UpdateSources.Winget.Enabled;
         ChocolateyEnabled = c.UpdateSources.Chocolatey.Enabled;
-        RequireConfirmation = c.UpdateBehavior.RequireConfirmation;
+        GitHubEnabled = c.UpdateSources.GitHub.Enabled && c.GitHub.Enabled;
+        WindowsUpdateEnabled = c.WindowsUpdate.Enabled;
+        GitHubToken = c.GitHub.Token ?? string.Empty;
+        SelfUpdateEnabled = c.GitHub.SelfUpdate.Enabled;
+        SelfUpdateRepo = string.IsNullOrWhiteSpace(c.GitHub.SelfUpdate.Owner)
+            ? $"{AppInfo.GitHubOwner}/{AppInfo.GitHubRepo}"
+            : $"{c.GitHub.SelfUpdate.Owner}/{c.GitHub.SelfUpdate.Repo}";
+        GitHubReposText = string.Join(Environment.NewLine,
+            c.GitHub.Repositories
+                .Where(r => !string.IsNullOrWhiteSpace(r.Owner) && !string.IsNullOrWhiteSpace(r.Repo))
+                .Select(r =>
+                {
+                    var line = $"{r.Owner}/{r.Repo}";
+                    if (!string.IsNullOrWhiteSpace(r.DisplayName))
+                        line += "|" + r.DisplayName;
+                    if (!string.IsNullOrWhiteSpace(r.AssetPattern) && r.AssetPattern != ".exe")
+                        line += "|" + r.AssetPattern;
+                    return line;
+                }));
         MaxConcurrentUpdates = c.UpdateBehavior.MaxConcurrentUpdates;
         IncludeUnknown = c.UpdateBehavior.IncludeUnknown;
         IncludePinned = c.UpdateBehavior.IncludePinned;
@@ -61,6 +105,7 @@ public partial class SettingsViewModel : ObservableObject
         ExcludedPackageIdsText = string.Join(Environment.NewLine, c.Exclusions.PackageIds);
         ConfigPath = _config.ConfigPath;
         RefreshShortcutStatus();
+        _loading = false;
     }
 
     [RelayCommand]
@@ -71,9 +116,25 @@ public partial class SettingsViewModel : ObservableObject
         c.General.CheckIntervalHours = Math.Clamp(CheckIntervalHours, 1, 168);
         c.General.CreateBackups = CreateBackups;
         c.General.AllowInstallerDesktopShortcuts = AllowInstallerDesktopShortcuts;
+        var themeId = SelectedTheme?.Id ?? ThemeCatalog.SystemId;
+        c.General.Theme = ThemeManager.ToConfigValue(themeId);
+        ThemeManager.Apply(themeId);
         c.UpdateSources.Winget.Enabled = WingetEnabled;
         c.UpdateSources.Chocolatey.Enabled = ChocolateyEnabled;
-        c.UpdateBehavior.RequireConfirmation = RequireConfirmation;
+        c.UpdateSources.GitHub.Enabled = GitHubEnabled;
+        c.GitHub.Enabled = GitHubEnabled;
+        c.GitHub.Token = string.IsNullOrWhiteSpace(GitHubToken) ? null : GitHubToken.Trim();
+        c.WindowsUpdate.Enabled = WindowsUpdateEnabled;
+        c.WindowsUpdate.IncludeDrivers = WindowsUpdateEnabled;
+        c.GitHub.SelfUpdate.Enabled = SelfUpdateEnabled;
+        if (!string.IsNullOrWhiteSpace(SelfUpdateRepo) && SelfUpdateRepo.Contains('/'))
+        {
+            var parts = SelfUpdateRepo.Trim().Split('/', 2);
+            c.GitHub.SelfUpdate.Owner = parts[0].Trim();
+            c.GitHub.SelfUpdate.Repo = parts[1].Trim();
+        }
+        c.GitHub.Repositories = ParseGitHubRepos(GitHubReposText);
+        c.UpdateBehavior.RequireConfirmation = false;
         c.UpdateBehavior.MaxConcurrentUpdates = Math.Clamp(MaxConcurrentUpdates, 1, 4);
         c.UpdateBehavior.IncludeUnknown = IncludeUnknown;
         c.UpdateBehavior.IncludePinned = IncludePinned;
@@ -86,6 +147,23 @@ public partial class SettingsViewModel : ObservableObject
         c.Exclusions.Keywords = SplitLines(ExcludedKeywordsText);
         c.Exclusions.PackageIds = SplitLines(ExcludedPackageIdsText);
         _config.Save();
+    }
+
+    [RelayCommand]
+    private void OpenFeedback()
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = AppInfo.GitHubIssuesUrl,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "Feedback", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     [RelayCommand]
@@ -157,4 +235,34 @@ public partial class SettingsViewModel : ObservableObject
             .Where(s => !string.IsNullOrWhiteSpace(s))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+    /// <summary>
+    /// Lines: owner/repo or owner/repo|Display Name or owner/repo|Display Name|assetPattern
+    /// </summary>
+    private static List<GitHubTrackedRepo> ParseGitHubRepos(string text)
+    {
+        var list = new List<GitHubTrackedRepo>();
+        foreach (var line in SplitLines(text))
+        {
+            var parts = line.Split('|', StringSplitOptions.TrimEntries);
+            var repoPart = parts[0];
+            if (!repoPart.Contains('/'))
+                continue;
+            var slash = repoPart.IndexOf('/');
+            var owner = repoPart[..slash].Trim();
+            var repo = repoPart[(slash + 1)..].Trim();
+            if (string.IsNullOrWhiteSpace(owner) || string.IsNullOrWhiteSpace(repo))
+                continue;
+
+            list.Add(new GitHubTrackedRepo
+            {
+                Owner = owner,
+                Repo = repo,
+                DisplayName = parts.Length > 1 ? parts[1] : $"{owner}/{repo}",
+                AssetPattern = parts.Length > 2 ? parts[2] : ".exe"
+            });
+        }
+
+        return list;
+    }
 }

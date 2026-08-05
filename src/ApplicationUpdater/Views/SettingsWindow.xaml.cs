@@ -14,6 +14,9 @@ public partial class SettingsWindow : Window
         AppIcon.ApplyTo(this);
         _viewModel = viewModel;
         DataContext = viewModel;
+        SourceInitialized += (_, _) =>
+            WindowChromeHelper.ApplyTheme(this, ThemeManager.IsDarkEffective);
+        ThemeManager.RefreshWindow(this);
     }
 
     private void Ok_Click(object sender, RoutedEventArgs e)
@@ -25,6 +28,8 @@ public partial class SettingsWindow : Window
 
     private void Cancel_Click(object sender, RoutedEventArgs e)
     {
+        // Undo live theme preview from the combo box
+        _viewModel.RevertThemePreview();
         DialogResult = false;
         Close();
     }

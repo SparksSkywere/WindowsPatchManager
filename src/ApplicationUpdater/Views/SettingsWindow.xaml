@@ -7,9 +7,11 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResizeWithGrip"
         ShowInTaskbar="False"
+        Background="{DynamicResource WindowBackgroundBrush}"
+        Foreground="{DynamicResource PrimaryTextBrush}"
         Icon="pack://application:,,,/Assets/app.ico">
 
-    <DockPanel Margin="12">
+    <DockPanel Margin="12" Background="{DynamicResource WindowBackgroundBrush}">
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
             <Button Content="OK" Width="88" Height="28" Margin="0,0,8,0"
                     IsDefault="True" Click="Ok_Click"
@@ -33,6 +35,23 @@
                         <CheckBox Content="Write a backup manifest before installing updates"
                                   IsChecked="{Binding CreateBackups}" Margin="0,10,0,0"/>
 
+                        <TextBlock Text="Appearance" Style="{StaticResource SectionHeaderStyle}" Margin="0,18,0,8"/>
+                        <TextBlock Text="Theme" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <ComboBox ItemsSource="{Binding ThemeOptions}"
+                                  SelectedItem="{Binding SelectedTheme}"
+                                  DisplayMemberPath="Label"
+                                  Width="280" HorizontalAlignment="Left"/>
+                        <TextBlock Text="Default is System (follows Windows light/dark). Other options are era styles from Chronolog (Windows 95 through Windows 11 Dark)."
+                                   Style="{StaticResource MutedTextStyle}" Margin="0,6,0,0" TextWrapping="Wrap"/>
+
+                        <TextBlock Text="Feedback" Style="{StaticResource SectionHeaderStyle}" Margin="0,18,0,8"/>
+                        <TextBlock Text="Report issues or request features on GitHub:"
+                                   Style="{StaticResource MutedTextStyle}" TextWrapping="Wrap"/>
+                        <Button Content="Open GitHub feedback…" Margin="0,8,0,0" HorizontalAlignment="Left"
+                                Padding="10,4" Command="{Binding OpenFeedbackCommand}"
+                                Style="{StaticResource ToolbarButtonStyle}"
+                                ToolTip="https://github.com/SparksSkywere/WindowsPatchManager/issues"/>
+
                         <TextBlock Text="Desktop shortcuts" Style="{StaticResource SectionHeaderStyle}" Margin="0,18,0,8"/>
                         <CheckBox Content="Allow installers to create desktop shortcuts during updates"
                                   IsChecked="{Binding AllowInstallerDesktopShortcuts}"/>
@@ -53,6 +72,24 @@
                         <TextBlock Text="Update sources" Style="{StaticResource SectionHeaderStyle}" Margin="0,18,0,8"/>
                         <CheckBox Content="Windows Package Manager (winget)" IsChecked="{Binding WingetEnabled}"/>
                         <CheckBox Content="Chocolatey" IsChecked="{Binding ChocolateyEnabled}"/>
+                        <CheckBox Content="GitHub Releases" IsChecked="{Binding GitHubEnabled}"/>
+                        <CheckBox Content="Windows Update / Drivers / CVE patches" IsChecked="{Binding WindowsUpdateEnabled}"/>
+
+                        <TextBlock Text="GitHub tracked projects" Style="{StaticResource SectionHeaderStyle}" Margin="0,18,0,8"/>
+                        <TextBlock Text="One repo per line: owner/repo|Display Name|assetPattern  (example: myorg/chronolog|Chronolog|.exe)"
+                                   Style="{StaticResource MutedTextStyle}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                        <TextBox Height="90" AcceptsReturn="True" VerticalScrollBarVisibility="Auto"
+                                 Text="{Binding GitHubReposText, UpdateSourceTrigger=PropertyChanged}"
+                                 FontFamily="Consolas"/>
+                        <TextBlock Text="Optional GitHub token (PAT) for rate limits / private repos" FontWeight="SemiBold" Margin="0,10,0,4"/>
+                        <TextBox Text="{Binding GitHubToken, UpdateSourceTrigger=PropertyChanged}"/>
+                        <CheckBox Content="Check GitHub for Windows Patch Manager self-update"
+                                  IsChecked="{Binding SelfUpdateEnabled}" Margin="0,10,0,0"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                            <TextBlock Text="Self-update repo:" VerticalAlignment="Center" Width="120"/>
+                            <TextBox Width="220" Text="{Binding SelfUpdateRepo, UpdateSourceTrigger=PropertyChanged}"
+                                     ToolTip="owner/repo"/>
+                        </StackPanel>
 
                         <TextBlock Text="Configuration file" Style="{StaticResource SectionHeaderStyle}" Margin="0,18,0,8"/>
                         <TextBox Text="{Binding ConfigPath}" IsReadOnly="True"
@@ -65,9 +102,7 @@
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
                     <StackPanel>
                         <TextBlock Text="Install behavior" Style="{StaticResource SectionHeaderStyle}"/>
-                        <CheckBox Content="Ask for confirmation before installing updates"
-                                  IsChecked="{Binding RequireConfirmation}"/>
-                        <CheckBox Content="Silent installers when supported" IsChecked="{Binding Silent}" Margin="0,6,0,0"/>
+                        <CheckBox Content="Silent installers when supported" IsChecked="{Binding Silent}"/>
                         <CheckBox Content="Include packages with unknown version (and repair them)"
                                   IsChecked="{Binding IncludeUnknown}" Margin="0,6,0,0"/>
                         <CheckBox Content="Include pinned packages" IsChecked="{Binding IncludePinned}" Margin="0,6,0,0"/>

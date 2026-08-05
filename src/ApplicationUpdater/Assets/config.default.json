@@ -6,7 +6,8 @@
     "backupDirectory": "backups",
     "showOnlyUpdatable": false,
     "startMinimized": false,
-    "allowInstallerDesktopShortcuts": false
+    "allowInstallerDesktopShortcuts": false,
+    "theme": "system"
   },
   "updateSources": {
     "winget": {
@@ -16,25 +17,44 @@
     "chocolatey": {
       "enabled": true,
       "priority": 2
+    },
+    "gitHub": {
+      "enabled": true,
+      "priority": 3
     }
   },
+  "github": {
+    "enabled": true,
+    "token": "",
+    "repositories": [
+      {
+        "owner": "",
+        "repo": "",
+        "displayName": "",
+        "installedVersion": "",
+        "assetPattern": ".exe"
+      }
+    ],
+    "selfUpdate": {
+      "enabled": true,
+      "owner": "SparksSkywere",
+      "repo": "WindowsPatchManager",
+      "assetPattern": "Setup"
+    }
+  },
+  "windowsUpdate": {
+    "enabled": true,
+    "includeDrivers": true,
+    "includeOptional": false
+  },
   "exclusions": {
-    "programs": [
-      "Windows Security",
-      "Microsoft Edge WebView2 Runtime",
-      "Microsoft Visual C++ 2015-2022 Redistributable"
-    ],
+    "programs": [],
     "publishers": [],
-    "keywords": [
-      "driver",
-      "codec",
-      "redistributable",
-      "runtime"
-    ],
+    "keywords": [],
     "packageIds": []
   },
   "updateBehavior": {
-    "requireConfirmation": true,
+    "requireConfirmation": false,
     "maxConcurrentUpdates": 2,
     "restartIfRequired": false,
     "includeUnknown": true,

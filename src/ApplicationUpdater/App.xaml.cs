@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Threading;
 using ApplicationUpdater.Cli;
+using ApplicationUpdater.Helpers;
 using ApplicationUpdater.Services;
 using ApplicationUpdater.ViewModels;
 
@@ -36,14 +37,31 @@ public partial class App : Application
             args.SetObserved();
         };
 
+        // GUI: offer elevation once. If the user declines UAC, continue without admin
+        // (individual installers can still prompt later). CLI is left as-is.
+        if (!CliHost.ShouldRunCli(e.Args) && ElevationHelper.TryRelaunchElevated(e.Args))
+        {
+            Shutdown(0);
+            return;
+        }
+
         var config = new ConfigService();
+        ThemeManager.Apply(config.Config.General.Theme);
+
         _log = new LogService();
+        if (ElevationHelper.IsElevated())
+            _log.Info("Running with administrator privileges.");
+        else
+            _log.Info("Running without administrator privileges (UAC declined or unavailable). Installers may still request elevation.");
+
         var unknownVersions = new UnknownVersionStore(config.AppDataDirectory);
         var winget = new WingetService(config, _log);
         var chocolatey = new ChocolateyService(_log);
         var detector = new ProgramDetectorService(config, winget, chocolatey, _log, unknownVersions);
         var installer = new UpdateInstallerService(config, winget, chocolatey, _log, unknownVersions);
-        var patchManager = new PatchManagerService(config, detector, installer, _log);
+        var github = new GitHubUpdateService(config, _log);
+        var windowsUpdate = new WindowsUpdateService(config, _log);
+        var patchManager = new PatchManagerService(config, detector, installer, github, windowsUpdate, _log);
         var scheduler = new SchedulerService(_log);
 
         if (CliHost.ShouldRunCli(e.Args))
@@ -55,8 +73,15 @@ public partial class App : Application
             return;
         }
 
+        // Ensure self-update defaults point at the public repo when empty
+        if (string.IsNullOrWhiteSpace(config.Config.GitHub.SelfUpdate.Owner))
+        {
+            config.Config.GitHub.SelfUpdate.Owner = AppInfo.GitHubOwner;
+            config.Config.GitHub.SelfUpdate.Repo = AppInfo.GitHubRepo;
+        }
+
         var mainVm = new MainViewModel(patchManager, scheduler, _log);
-        var window = new MainWindow(mainVm, config);
+        var window = new MainWindow(mainVm, config, winget, _log);
         MainWindow = window;
         window.Show();
     }

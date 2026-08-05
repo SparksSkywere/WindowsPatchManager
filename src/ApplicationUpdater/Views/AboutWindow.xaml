@@ -7,10 +7,11 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
-        Background="{StaticResource WindowBackgroundBrush}"
+        Background="{DynamicResource WindowBackgroundBrush}"
+        Foreground="{DynamicResource PrimaryTextBrush}"
         Icon="pack://application:,,,/Assets/app.ico">
 
-    <DockPanel Margin="20">
+    <DockPanel Margin="20" Background="{DynamicResource WindowBackgroundBrush}">
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
             <Button Content="OK" Width="88" Height="28" IsDefault="True" IsCancel="True"
                     Click="Ok_Click" Style="{StaticResource PrimaryButtonStyle}"/>
@@ -31,8 +32,8 @@
             <TextBlock x:Name="DescriptionText" TextWrapping="Wrap" Margin="0,0,0,16"
                        LineHeight="20"/>
 
-            <Border Background="{StaticResource PanelBackgroundBrush}"
-                    BorderBrush="{StaticResource BorderBrushSubtle}"
+            <Border Background="{DynamicResource PanelBackgroundBrush}"
+                    BorderBrush="{DynamicResource BorderBrushSubtle}"
                     BorderThickness="1" Padding="12" CornerRadius="3">
                 <StackPanel>
                     <TextBlock Text="Created by" Style="{StaticResource MutedTextStyle}" FontSize="11"/>
@@ -40,6 +41,11 @@
                                Text="Skywere Industries"/>
                     <TextBlock x:Name="CopyrightText" Style="{StaticResource MutedTextStyle}"
                                TextWrapping="Wrap"/>
+                    <TextBlock Margin="0,12,0,2" Style="{StaticResource MutedTextStyle}" FontSize="11"
+                               Text="Feedback &amp; source"/>
+                    <TextBlock x:Name="GitHubLink" Cursor="Hand" Foreground="{DynamicResource AccentBrush}"
+                               TextDecorations="Underline" Text="github.com/SparksSkywere/WindowsPatchManager"
+                               MouseLeftButtonUp="GitHubLink_Click"/>
                 </StackPanel>
             </Border>
         </StackPanel>
