@@ -5,7 +5,8 @@
     "createBackups": true,
     "backupDirectory": "backups",
     "showOnlyUpdatable": false,
-    "startMinimized": false
+    "startMinimized": false,
+    "allowInstallerDesktopShortcuts": false
   },
   "updateSources": {
     "winget": {

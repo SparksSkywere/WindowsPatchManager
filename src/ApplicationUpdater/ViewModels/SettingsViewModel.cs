@@ -1,3 +1,5 @@
+using System.Windows;
+using ApplicationUpdater.Helpers;
 using ApplicationUpdater.Models;
 using ApplicationUpdater.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -12,6 +14,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _autoCheckUpdates;
     [ObservableProperty] private int _checkIntervalHours;
     [ObservableProperty] private bool _createBackups;
+    [ObservableProperty] private bool _allowInstallerDesktopShortcuts;
     [ObservableProperty] private bool _wingetEnabled;
     [ObservableProperty] private bool _chocolateyEnabled;
     [ObservableProperty] private bool _requireConfirmation;
@@ -27,6 +30,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _excludedKeywordsText = string.Empty;
     [ObservableProperty] private string _excludedPackageIdsText = string.Empty;
     [ObservableProperty] private string _configPath = string.Empty;
+    [ObservableProperty] private string _shortcutStatus = string.Empty;
 
     public SettingsViewModel(ConfigService config)
     {
@@ -40,6 +44,7 @@ public partial class SettingsViewModel : ObservableObject
         AutoCheckUpdates = c.General.AutoCheckUpdates;
         CheckIntervalHours = c.General.CheckIntervalHours;
         CreateBackups = c.General.CreateBackups;
+        AllowInstallerDesktopShortcuts = c.General.AllowInstallerDesktopShortcuts;
         WingetEnabled = c.UpdateSources.Winget.Enabled;
         ChocolateyEnabled = c.UpdateSources.Chocolatey.Enabled;
         RequireConfirmation = c.UpdateBehavior.RequireConfirmation;
@@ -55,6 +60,7 @@ public partial class SettingsViewModel : ObservableObject
         ExcludedKeywordsText = string.Join(Environment.NewLine, c.Exclusions.Keywords);
         ExcludedPackageIdsText = string.Join(Environment.NewLine, c.Exclusions.PackageIds);
         ConfigPath = _config.ConfigPath;
+        RefreshShortcutStatus();
     }
 
     [RelayCommand]
@@ -64,6 +70,7 @@ public partial class SettingsViewModel : ObservableObject
         c.General.AutoCheckUpdates = AutoCheckUpdates;
         c.General.CheckIntervalHours = Math.Clamp(CheckIntervalHours, 1, 168);
         c.General.CreateBackups = CreateBackups;
+        c.General.AllowInstallerDesktopShortcuts = AllowInstallerDesktopShortcuts;
         c.UpdateSources.Winget.Enabled = WingetEnabled;
         c.UpdateSources.Chocolatey.Enabled = ChocolateyEnabled;
         c.UpdateBehavior.RequireConfirmation = RequireConfirmation;
@@ -79,6 +86,70 @@ public partial class SettingsViewModel : ObservableObject
         c.Exclusions.Keywords = SplitLines(ExcludedKeywordsText);
         c.Exclusions.PackageIds = SplitLines(ExcludedPackageIdsText);
         _config.Save();
+    }
+
+    [RelayCommand]
+    private void CreateDesktopShortcut()
+    {
+        try
+        {
+            DesktopShortcutHelper.CreatePatchManagerShortcut();
+            RefreshShortcutStatus();
+            MessageBox.Show(
+                $"Desktop shortcut created:\n{DesktopShortcutHelper.PatchManagerShortcutPath}",
+                "Desktop shortcut",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"Could not create desktop shortcut:\n{ex.Message}",
+                "Desktop shortcut",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
+    [RelayCommand]
+    private void RemoveDesktopShortcut()
+    {
+        try
+        {
+            if (DesktopShortcutHelper.RemovePatchManagerShortcut())
+            {
+                RefreshShortcutStatus();
+                MessageBox.Show(
+                    "Desktop shortcut removed.",
+                    "Desktop shortcut",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            else
+            {
+                RefreshShortcutStatus();
+                MessageBox.Show(
+                    "No Windows Patch Manager desktop shortcut was found.",
+                    "Desktop shortcut",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"Could not remove desktop shortcut:\n{ex.Message}",
+                "Desktop shortcut",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
+    private void RefreshShortcutStatus()
+    {
+        ShortcutStatus = DesktopShortcutHelper.PatchManagerShortcutExists()
+            ? "Desktop shortcut: present"
+            : "Desktop shortcut: not present";
     }
 
     private static List<string> SplitLines(string text) =>

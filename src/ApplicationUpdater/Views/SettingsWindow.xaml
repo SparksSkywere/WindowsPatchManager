@@ -2,8 +2,8 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Options"
-        Height="560" Width="560"
-        MinHeight="480" MinWidth="480"
+        Height="620" Width="580"
+        MinHeight="520" MinWidth="500"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResizeWithGrip"
         ShowInTaskbar="False"
@@ -33,6 +33,23 @@
                         <CheckBox Content="Write a backup manifest before installing updates"
                                   IsChecked="{Binding CreateBackups}" Margin="0,10,0,0"/>
 
+                        <TextBlock Text="Desktop shortcuts" Style="{StaticResource SectionHeaderStyle}" Margin="0,18,0,8"/>
+                        <CheckBox Content="Allow installers to create desktop shortcuts during updates"
+                                  IsChecked="{Binding AllowInstallerDesktopShortcuts}"/>
+                        <TextBlock Text="Off by default. When off, new desktop shortcuts created by package installers during an update run are removed afterward."
+                                   Style="{StaticResource MutedTextStyle}" Margin="0,6,0,8" TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding ShortcutStatus}" Style="{StaticResource MutedTextStyle}" Margin="0,0,0,8"/>
+                        <StackPanel Orientation="Horizontal">
+                            <Button Content="Create desktop shortcut" Padding="10,4" Margin="0,0,8,0"
+                                    Command="{Binding CreateDesktopShortcutCommand}"
+                                    Style="{StaticResource ToolbarButtonStyle}"
+                                    ToolTip="Create a Windows Patch Manager shortcut on your desktop"/>
+                            <Button Content="Remove desktop shortcut" Padding="10,4"
+                                    Command="{Binding RemoveDesktopShortcutCommand}"
+                                    Style="{StaticResource ToolbarButtonStyle}"
+                                    ToolTip="Remove the Windows Patch Manager desktop shortcut if present"/>
+                        </StackPanel>
+
                         <TextBlock Text="Update sources" Style="{StaticResource SectionHeaderStyle}" Margin="0,18,0,8"/>
                         <CheckBox Content="Windows Package Manager (winget)" IsChecked="{Binding WingetEnabled}"/>
                         <CheckBox Content="Chocolatey" IsChecked="{Binding ChocolateyEnabled}"/>
@@ -51,13 +68,14 @@
                         <CheckBox Content="Ask for confirmation before installing updates"
                                   IsChecked="{Binding RequireConfirmation}"/>
                         <CheckBox Content="Silent installers when supported" IsChecked="{Binding Silent}" Margin="0,6,0,0"/>
-                        <CheckBox Content="Include packages with unknown version" IsChecked="{Binding IncludeUnknown}" Margin="0,6,0,0"/>
+                        <CheckBox Content="Include packages with unknown version (and repair them)"
+                                  IsChecked="{Binding IncludeUnknown}" Margin="0,6,0,0"/>
                         <CheckBox Content="Include pinned packages" IsChecked="{Binding IncludePinned}" Margin="0,6,0,0"/>
                         <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
                             <TextBlock Text="Max concurrent updates:" VerticalAlignment="Center" Width="160"/>
                             <TextBox Width="60" Text="{Binding MaxConcurrentUpdates}"/>
                         </StackPanel>
-                        <TextBlock Text="Keep concurrency at 1–2 for more reliable installs."
+                        <TextBlock Text="Keep concurrency at 1–2 for more reliable installs. Unknown-version apps are force-reinstalled so Current is replaced with the available version."
                                    Style="{StaticResource MutedTextStyle}" Margin="0,8,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
                 </ScrollViewer>

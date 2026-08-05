@@ -18,9 +18,9 @@
     <Authors>Skywere Industries</Authors>
     <Copyright>Copyright © Skywere Industries</Copyright>
     <Description>Manage software updates on Windows using winget and Chocolatey.</Description>
-    <Version>2.1.1</Version>
-    <FileVersion>2.1.1</FileVersion>
-    <AssemblyVersion>2.1.1.0</AssemblyVersion>
+    <Version>2.1.2</Version>
+    <FileVersion>2.1.2</FileVersion>
+    <AssemblyVersion>2.1.2.0</AssemblyVersion>
     <NeutralLanguage>en-US</NeutralLanguage>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>

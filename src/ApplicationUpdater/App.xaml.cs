@@ -38,10 +38,11 @@ public partial class App : Application
 
         var config = new ConfigService();
         _log = new LogService();
+        var unknownVersions = new UnknownVersionStore(config.AppDataDirectory);
         var winget = new WingetService(config, _log);
         var chocolatey = new ChocolateyService(_log);
-        var detector = new ProgramDetectorService(config, winget, chocolatey, _log);
-        var installer = new UpdateInstallerService(config, winget, chocolatey, _log);
+        var detector = new ProgramDetectorService(config, winget, chocolatey, _log, unknownVersions);
+        var installer = new UpdateInstallerService(config, winget, chocolatey, _log, unknownVersions);
         var patchManager = new PatchManagerService(config, detector, installer, _log);
         var scheduler = new SchedulerService(_log);
 

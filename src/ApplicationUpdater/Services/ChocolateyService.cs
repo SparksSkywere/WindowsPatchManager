@@ -14,6 +14,32 @@ public sealed class ChocolateyService
         _log = log;
     }
 
+    private static string ExtractChocoError(ProcessResult proc)
+    {
+        if (proc.TimedOut)
+            return "Update timed out.";
+
+        var text = proc.CombinedOutput;
+        if (string.IsNullOrWhiteSpace(text))
+            return $"choco exit code {proc.ExitCode}";
+
+        var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var line in lines.Reverse())
+        {
+            if (line.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("fail", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("denied", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("not recognized", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("Unable to", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("Cannot", StringComparison.OrdinalIgnoreCase))
+            {
+                return line;
+            }
+        }
+
+        return lines.LastOrDefault() ?? $"choco exit code {proc.ExitCode}";
+    }
+
     public async Task<bool> IsAvailableAsync(CancellationToken ct = default)
     {
         if (_available.HasValue)
@@ -138,25 +164,60 @@ public sealed class ChocolateyService
 
         _log.Info($"Upgrading {program.Name} ({program.PackageId}) via Chocolatey...");
 
-        var proc = await ProcessRunner.RunAsync(
-            "choco",
-            ["upgrade", program.PackageId, "-y", "--no-progress"],
-            ct,
-            timeoutSeconds: 900).ConfigureAwait(false);
+        // Prefer elevated run — most Chocolatey upgrades need admin and fail silently without it.
+        var attempts = new[]
+        {
+            new ProcessRunOptions { TimeoutSeconds = 900, Elevate = true, ShowWindow = false },
+            new ProcessRunOptions { TimeoutSeconds = 900, Elevate = false, ShowWindow = false }
+        };
 
-        result.Output = proc.CombinedOutput;
+        ProcessResult? proc = null;
+        foreach (var options in attempts)
+        {
+            ct.ThrowIfCancellationRequested();
+            proc = await ProcessRunner.RunAsync(
+                "choco",
+                ["upgrade", program.PackageId, "-y", "--no-progress", "--limit-output"],
+                options,
+                ct).ConfigureAwait(false);
+
+            result.Output = string.IsNullOrWhiteSpace(result.Output)
+                ? proc.CombinedOutput
+                : result.Output + "\n\n" + proc.CombinedOutput;
+
+            result.Success = proc.Success ||
+                             proc.CombinedOutput.Contains("is the latest version", StringComparison.OrdinalIgnoreCase) ||
+                             proc.CombinedOutput.Contains("upgraded", StringComparison.OrdinalIgnoreCase) ||
+                             proc.CombinedOutput.Contains("already installed", StringComparison.OrdinalIgnoreCase);
+
+            if (result.Success)
+                break;
+
+            // Don't retry non-elevated if user cancelled UAC
+            if (proc.StdErr.Contains("cancelled", StringComparison.OrdinalIgnoreCase) ||
+                proc.CombinedOutput.Contains("cancelled", StringComparison.OrdinalIgnoreCase))
+                break;
+        }
+
         result.EndTime = DateTime.Now;
-        result.Success = proc.Success ||
-                         proc.CombinedOutput.Contains("is the latest version", StringComparison.OrdinalIgnoreCase);
 
         if (result.Success)
-            _log.Success($"Updated {program.Name} via Chocolatey");
+        {
+            if (!string.IsNullOrWhiteSpace(program.AvailableVersion) &&
+                !VersionText.IsUnknown(program.AvailableVersion))
+            {
+                program.Version = program.AvailableVersion.Trim();
+            }
+
+            program.UpdateAvailable = false;
+            _log.Success($"Updated {program.Name} via Chocolatey → {program.Version}");
+        }
         else
         {
-            result.ErrorMessage = proc.TimedOut
-                ? "Update timed out."
-                : (proc.StdErr.Trim().Split('\n').LastOrDefault() ?? $"choco exit code {proc.ExitCode}");
+            result.ErrorMessage = ExtractChocoError(proc ?? new ProcessResult { ExitCode = -1, StdErr = "No attempt ran." });
             _log.Error($"Failed to update {program.Name}: {result.ErrorMessage}");
+            if (proc is not null && !string.IsNullOrWhiteSpace(proc.CombinedOutput))
+                _log.Error(proc.CombinedOutput.Length > 800 ? proc.CombinedOutput[..800] + "…" : proc.CombinedOutput);
         }
 
         return result;

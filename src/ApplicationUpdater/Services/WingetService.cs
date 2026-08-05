@@ -191,13 +191,17 @@ public sealed class WingetService
         }
 
         var isRemoveOnly = program.Name.Contains("remove only", StringComparison.OrdinalIgnoreCase);
+        var isUnknownVersion = VersionText.IsUnknown(program.Version);
         if (isRemoveOnly)
             _log.Warn($"{program.Name} is marked '(remove only)' by winget — will try upgrade then force install.");
+        if (isUnknownVersion)
+            _log.Info($"{program.Name} has unknown current version — will force reinstall to {program.AvailableVersion} to repair.");
 
         _log.Info($"Upgrading {program.Name} ({program.PackageId}) via winget...");
 
-        // Attempt ladder: silent → non-silent quiet → interactive UI → elevated interactive → force install
-        var attempts = BuildAttempts(program, isRemoveOnly);
+        // Attempt ladder: silent → quiet → interactive → elevated → force install
+        // Unknown versions start with force reinstall so broken ARP states get replaced.
+        var attempts = BuildAttempts(program, isRemoveOnly, isUnknownVersion);
         ProcessResult? last = null;
         var attemptIndex = 0;
 
@@ -226,7 +230,8 @@ public sealed class WingetService
             {
                 result.Success = true;
                 result.EndTime = DateTime.Now;
-                _log.Success($"Updated {program.Name} ({attempt.Description})");
+                ApplyInstalledVersion(program);
+                _log.Success($"Updated {program.Name} → {program.Version} ({attempt.Description})");
                 return result;
             }
 
@@ -248,10 +253,38 @@ public sealed class WingetService
         return result;
     }
 
-    private List<WingetAttempt> BuildAttempts(ProgramInfo program, bool isRemoveOnly)
+    private List<WingetAttempt> BuildAttempts(ProgramInfo program, bool isRemoveOnly, bool isUnknownVersion)
     {
         var behavior = _config.Config.UpdateBehavior;
         var attempts = new List<WingetAttempt>();
+
+        // Unknown / broken ARP: reinstall available version first (force) so "Unknown" is replaced.
+        if (isUnknownVersion)
+        {
+            if (behavior.Silent)
+            {
+                attempts.Add(new WingetAttempt(
+                    "silent force install (unknown version repair)",
+                    BuildInstallArgs(program, force: true, interactive: false),
+                    TimeoutSeconds: 900,
+                    ShowWindow: false,
+                    Elevate: false));
+
+                attempts.Add(new WingetAttempt(
+                    "silent force upgrade (unknown version repair)",
+                    BuildUpgradeArgs(program, silent: true, interactive: false, force: true),
+                    TimeoutSeconds: 900,
+                    ShowWindow: false,
+                    Elevate: false));
+            }
+
+            attempts.Add(new WingetAttempt(
+                "force install (unknown version repair)",
+                BuildInstallArgs(program, force: true, interactive: true),
+                TimeoutSeconds: 1800,
+                ShowWindow: true,
+                Elevate: true));
+        }
 
         // 1) Preferred silent (if configured)
         if (behavior.Silent)
@@ -289,15 +322,31 @@ public sealed class WingetService
             Elevate: true));
 
         // 5) Force reinstall (helps "(remove only)" and broken ARP states)
-        attempts.Add(new WingetAttempt(
-            isRemoveOnly ? "force install (remove-only package)" : "force install (repair)",
-            BuildInstallArgs(program, force: true, interactive: true),
-            TimeoutSeconds: 1800,
-            ShowWindow: true,
-            Elevate: true));
-
+        if (!isUnknownVersion)
+        {
+            attempts.Add(new WingetAttempt(
+                isRemoveOnly ? "force install (remove-only package)" : "force install (repair)",
+                BuildInstallArgs(program, force: true, interactive: true),
+                TimeoutSeconds: 1800,
+                ShowWindow: true,
+                Elevate: true));
+        }
 
         return attempts;
+    }
+
+    /// <summary>
+    /// After a successful install/upgrade, replace Unknown (or stale) current version with the target version.
+    /// </summary>
+    private static void ApplyInstalledVersion(ProgramInfo program)
+    {
+        if (!string.IsNullOrWhiteSpace(program.AvailableVersion) &&
+            !VersionText.IsUnknown(program.AvailableVersion))
+        {
+            program.Version = program.AvailableVersion.Trim();
+        }
+
+        program.UpdateAvailable = false;
     }
 
     private List<string> BuildUpgradeArgs(ProgramInfo program, bool silent, bool interactive, bool force)

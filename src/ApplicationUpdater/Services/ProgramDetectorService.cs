@@ -1,3 +1,4 @@
+using ApplicationUpdater.Helpers;
 using ApplicationUpdater.Models;
 
 namespace ApplicationUpdater.Services;
@@ -8,17 +9,20 @@ public sealed class ProgramDetectorService
     private readonly WingetService _winget;
     private readonly ChocolateyService _chocolatey;
     private readonly LogService _log;
+    private readonly UnknownVersionStore _unknownVersions;
 
     public ProgramDetectorService(
         ConfigService config,
         WingetService winget,
         ChocolateyService chocolatey,
-        LogService log)
+        LogService log,
+        UnknownVersionStore unknownVersions)
     {
         _config = config;
         _winget = winget;
         _chocolatey = chocolatey;
         _log = log;
+        _unknownVersions = unknownVersions;
     }
 
     public async Task<IReadOnlyList<ProgramInfo>> ScanAsync(
@@ -69,6 +73,7 @@ public sealed class ProgramDetectorService
 
         progress?.Report(new ScanProgress { Message = "Merging results...", Percent = 90 });
         var merged = Deduplicate(combined);
+        ApplyKnownVersionFixes(merged);
         _log.Info($"Scan complete: {merged.Count} unique programs.");
         progress?.Report(new ScanProgress { Message = $"Found {merged.Count} programs", Percent = 100 });
         return merged;
@@ -142,7 +147,12 @@ public sealed class ProgramDetectorService
         // If scan list is empty, still surface upgrades as their own rows
         if (list.Count == 0)
         {
-            list.AddRange(upgradeMapById.Values.Select(u => u.Clone()));
+            foreach (var upgrade in upgradeMapById.Values)
+            {
+                if (_config.IsExcluded(upgrade) || IsAlreadyFixedUnknown(upgrade, upgrade))
+                    continue;
+                list.Add(upgrade.Clone());
+            }
         }
         else
         {
@@ -166,8 +176,23 @@ public sealed class ProgramDetectorService
                 if (upgrade is null)
                     continue;
 
+                // If ARP/winget still reports Unknown but we already force-installed this available version, treat as fixed.
+                if (IsAlreadyFixedUnknown(program, upgrade))
+                {
+                    ApplyFixedVersionDisplay(program, upgrade);
+                    continue;
+                }
+
                 program.UpdateAvailable = true;
                 program.AvailableVersion = upgrade.AvailableVersion;
+                if (VersionText.IsUnknown(program.Version) &&
+                    !VersionText.IsUnknown(upgrade.Version) &&
+                    !string.Equals(upgrade.Version, upgrade.AvailableVersion, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Prefer winget's reported installed column when it has a real value.
+                    program.Version = upgrade.Version;
+                }
+
                 if (string.IsNullOrWhiteSpace(program.PackageId))
                     program.PackageId = upgrade.PackageId;
                 // Prefer package-manager source for install
@@ -179,12 +204,19 @@ public sealed class ProgramDetectorService
             var existingIds = new HashSet<string>(
                 list.Where(p => !string.IsNullOrWhiteSpace(p.PackageId)).Select(p => p.PackageId),
                 StringComparer.OrdinalIgnoreCase);
+            var existingNames = new HashSet<string>(
+                list.Select(p => NormalizeName(p.Name)),
+                StringComparer.OrdinalIgnoreCase);
 
             foreach (var upgrade in upgradeMapById.Values)
             {
                 if (existingIds.Contains(upgrade.PackageId))
                     continue;
+                if (existingNames.Contains(NormalizeName(upgrade.Name)))
+                    continue;
                 if (_config.IsExcluded(upgrade))
+                    continue;
+                if (IsAlreadyFixedUnknown(upgrade, upgrade))
                     continue;
                 list.Add(upgrade.Clone());
             }
@@ -199,6 +231,9 @@ public sealed class ProgramDetectorService
                 program.AvailableVersion = string.Empty;
             }
         }
+
+        // Prefer winget rows over Chocolatey duplicates for the same product name
+        list = PreferWingetOverChocolateyDuplicates(list);
 
         var count = list.Count(p => p.UpdateAvailable);
         _log.Info($"Update check complete: {count} update(s) available.");
@@ -262,5 +297,98 @@ public sealed class ProgramDetectorService
             .Where(ch => char.IsLetterOrDigit(ch))
             .ToArray();
         return new string(chars);
+    }
+
+    private void ApplyKnownVersionFixes(List<ProgramInfo> programs)
+    {
+        foreach (var program in programs)
+        {
+            if (!VersionText.IsUnknown(program.Version))
+                continue;
+
+            if (TryResolveFixedVersion(program, out var fixedVersion))
+                program.Version = fixedVersion;
+        }
+    }
+
+    private bool IsAlreadyFixedUnknown(ProgramInfo program, ProgramInfo upgrade)
+    {
+        // Suppress re-offering the same catalog version after we force-fixed an Unknown install.
+        if (!string.IsNullOrWhiteSpace(program.PackageId) &&
+            _unknownVersions.IsSatisfied(program.PackageId, upgrade.AvailableVersion))
+            return true;
+
+        if (!string.IsNullOrWhiteSpace(upgrade.PackageId) &&
+            !string.Equals(program.PackageId, upgrade.PackageId, StringComparison.OrdinalIgnoreCase) &&
+            _unknownVersions.IsSatisfied(upgrade.PackageId, upgrade.AvailableVersion))
+            return true;
+
+        if (!string.IsNullOrWhiteSpace(program.Name) &&
+            _unknownVersions.IsSatisfied(program.Name, upgrade.AvailableVersion))
+            return true;
+
+        if (!string.IsNullOrWhiteSpace(upgrade.Name) &&
+            _unknownVersions.IsSatisfied(upgrade.Name, upgrade.AvailableVersion))
+            return true;
+
+        return false;
+    }
+
+    private void ApplyFixedVersionDisplay(ProgramInfo program, ProgramInfo upgrade)
+    {
+        if (TryResolveFixedVersion(program, out var fixedVersion) ||
+            TryResolveFixedVersion(upgrade, out fixedVersion))
+        {
+            program.Version = fixedVersion;
+        }
+        else if (!VersionText.IsUnknown(upgrade.AvailableVersion))
+        {
+            program.Version = upgrade.AvailableVersion.Trim();
+        }
+
+        program.UpdateAvailable = false;
+        program.AvailableVersion = string.Empty;
+        if (string.IsNullOrWhiteSpace(program.PackageId))
+            program.PackageId = upgrade.PackageId;
+    }
+
+    private bool TryResolveFixedVersion(ProgramInfo program, out string version)
+    {
+        if (!string.IsNullOrWhiteSpace(program.PackageId) &&
+            _unknownVersions.TryGetInstalledVersion(program.PackageId, out version))
+            return true;
+
+        if (!string.IsNullOrWhiteSpace(program.Name) &&
+            _unknownVersions.TryGetInstalledVersion(program.Name, out version))
+            return true;
+
+        version = string.Empty;
+        return false;
+    }
+
+    private static List<ProgramInfo> PreferWingetOverChocolateyDuplicates(List<ProgramInfo> list)
+    {
+        // If both winget and Chocolatey offer the same product with an update, keep winget only.
+        var wingetUpdateNames = new HashSet<string>(
+            list.Where(p => p.UpdateAvailable && p.Source == PackageSource.Winget)
+                .Select(p => NormalizeName(p.Name)),
+            StringComparer.OrdinalIgnoreCase);
+
+        if (wingetUpdateNames.Count == 0)
+            return list;
+
+        foreach (var program in list)
+        {
+            if (!program.UpdateAvailable || program.Source != PackageSource.Chocolatey)
+                continue;
+
+            if (wingetUpdateNames.Contains(NormalizeName(program.Name)))
+            {
+                program.UpdateAvailable = false;
+                program.AvailableVersion = string.Empty;
+            }
+        }
+
+        return list;
     }
 }

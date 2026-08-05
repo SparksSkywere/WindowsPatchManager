@@ -28,6 +28,12 @@ public sealed class GeneralSettings
     public string BackupDirectory { get; set; } = "backups";
     public bool ShowOnlyUpdatable { get; set; }
     public bool StartMinimized { get; set; }
+
+    /// <summary>
+    /// When true, package installers may leave new desktop shortcuts.
+    /// When false (default), shortcuts created during an update run are removed afterward.
+    /// </summary>
+    public bool AllowInstallerDesktopShortcuts { get; set; }
 }
 
 public sealed class UpdateSourcesSettings
