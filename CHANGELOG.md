@@ -5,6 +5,45 @@ All notable changes to **Windows Patch Manager** are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+---
+
+## [2.1.14] — 2026-08-05
+
+### Added
+- **Install** tab: search the winget catalog and install selected packages.
+- **Uninstall** tab: load installed winget packages and uninstall selected (with confirmation).
+- **Store origin detection** (Steam, Epic, GOG, Ubisoft, EA, Battle.net, Xbox, Microsoft Store, and more) for the Source column.
+- Version fill-in for games/apps that report **Unknown** via Steam/Epic manifests, Steam App IDs, and EXE file versions.
+- Publisher inference from install paths, store metadata, and package IDs when ARP data is empty.
+- **Initial scan** loads Applications, Drivers, and Windows Update together on launch.
+- Installer **major upgrade** improvements: remove previous product cleanly (including same-version rebuilds), close the running app before replace, wipe install folder orphans, stable UpgradeCode.
+- Build script keeps MSI/Setup version in sync with the app version.
+
+### Fixed
+- Scan list empty while showing “N programs” when **Show updates only** was on and no update flags were set yet (summary uses visible count; clearer empty state).
+- Games still showing **Unknown** / wrong origin after scan (Steam library VDF parsing, App ID matching, winget ARP IDs with spaces).
+- Update check **false positives** and updates reappearing after a successful install:
+  - Only offer updates when available is **strictly newer** than installed.
+  - Filter winget upgrade rows that are equal / not newer.
+  - Stricter package ID matching (no broad substring matches).
+  - Remember installed version after every successful update so the same version is not re-offered while ARP is still Unknown/stale.
+- Options **configuration file** path no longer paints system white in dark themes (themed border + transparent text host).
+- GridView **column resize** works again (header gripper on themed headers).
+- Fewer needless scrollbars in lists, menus, and short Options tabs.
+- Stacked MSI product entries when reinstalling the same version (AllowSameVersionUpgrades + proper RemoveExistingProducts).
+
+### Changed
+- **Tab switch does not re-scan** (only the initial load / Scan button refreshes data).
+- Columns renamed: **Current version**, **Available version**.
+- Menu bar labels (File, Edit, …) sit closer together; dropdown item spacing tightened earlier.
+- UI cleanup: shorter tab titles, less duplicate status text, tighter empty states and history banner.
+- Source column prefers store origin (Steam, Epic, …) over raw “registry” / “winget” when known.
+- Control backgrounds track theme chrome more reliably in dark mode.
+
+---
+
 ## [2.1.10] — 2026-08-05
 
 ### Fixed
@@ -89,6 +128,7 @@ Previous Python-based Patch Manager (GUI + winget/Chocolatey helpers). Supersede
 
 ---
 
+[2.1.14]: https://github.com/SparksSkywere/WindowsPatchManager/releases/tag/v2.1.14
 [2.1.10]: https://github.com/SparksSkywere/WindowsPatchManager/releases/tag/v2.1.10
 [2.1.9]: https://github.com/SparksSkywere/WindowsPatchManager/releases/tag/v2.1.9
 [2.1.0]: https://github.com/SparksSkywere/WindowsPatchManager/releases/tag/v2.1.0

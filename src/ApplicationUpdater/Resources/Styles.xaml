@@ -54,7 +54,7 @@
                             BorderBrush="{DynamicResource BorderBrushSubtle}"
                             BorderThickness="0,0,0,1"
                             SnapsToDevicePixels="True">
-                        <ItemsPresenter Margin="2,0"/>
+                        <ItemsPresenter Margin="0"/>
                     </Border>
                 </ControlTemplate>
             </Setter.Value>
@@ -66,14 +66,14 @@
         <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource BorderBrushSubtle}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="Padding" Value="2"/>
+        <Setter Property="Padding" Value="1"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ContextMenu">
                     <Border Background="{DynamicResource MenuBackgroundBrush}"
                             BorderBrush="{DynamicResource BorderBrushSubtle}"
                             BorderThickness="1"
-                            Padding="2"
+                            Padding="1"
                             SnapsToDevicePixels="True">
                         <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle"/>
                     </Border>
@@ -84,22 +84,23 @@
 
     <Style TargetType="Separator">
         <Setter Property="Background" Value="{DynamicResource MenuSeparatorBrush}"/>
-        <Setter Property="Margin" Value="6,3"/>
+        <Setter Property="Margin" Value="4,2"/>
         <Setter Property="Height" Value="1"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Separator">
-                    <Border Background="{DynamicResource MenuSeparatorBrush}" Height="1" Margin="6,3" SnapsToDevicePixels="True"/>
+                    <Border Background="{DynamicResource MenuSeparatorBrush}" Height="1" Margin="4,2" SnapsToDevicePixels="True"/>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
     </Style>
 
-    <!-- Top-level and submenu MenuItem — fully custom so popups are not system-light -->
+    <!-- Top-level and submenu MenuItem — compact spacing (was too airy) -->
     <Style TargetType="MenuItem">
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}"/>
-        <Setter Property="Padding" Value="10,5"/>
+        <Setter Property="Padding" Value="8,2"/>
+        <Setter Property="MinHeight" Value="22"/>
         <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
         <Setter Property="Template">
             <Setter.Value>
@@ -114,12 +115,12 @@
                                 <ColumnDefinition Width="Auto" SharedSizeGroup="MenuItemIconColumnGroup"/>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto" SharedSizeGroup="MenuItemIGTColumnGroup"/>
-                                <ColumnDefinition Width="14"/>
+                                <ColumnDefinition Width="12"/>
                             </Grid.ColumnDefinitions>
 
                             <ContentPresenter x:Name="Icon"
                                               Grid.Column="0"
-                                              Margin="0,0,6,0"
+                                              Margin="0,0,4,0"
                                               VerticalAlignment="Center"
                                               ContentSource="Icon"/>
 
@@ -131,14 +132,14 @@
 
                             <TextBlock x:Name="InputGestureText"
                                        Grid.Column="2"
-                                       Margin="16,0,0,0"
+                                       Margin="12,0,0,0"
                                        VerticalAlignment="Center"
                                        Foreground="{DynamicResource MutedTextBrush}"
                                        Text="{TemplateBinding InputGestureText}"/>
 
                             <Path x:Name="Arrow"
                                   Grid.Column="3"
-                                  Margin="4,0,0,0"
+                                  Margin="2,0,0,0"
                                   VerticalAlignment="Center"
                                   Data="M 0,0 L 4,3.5 L 0,7 Z"
                                   Fill="{DynamicResource PrimaryTextBrush}"
@@ -151,33 +152,42 @@
                                    Placement="Right"
                                    PopupAnimation="Fade"
                                    HorizontalOffset="0"
-                                   VerticalOffset="-3">
+                                   VerticalOffset="-2">
                                 <Border Background="{DynamicResource MenuBackgroundBrush}"
                                         BorderBrush="{DynamicResource BorderBrushSubtle}"
                                         BorderThickness="1"
-                                        Padding="2"
-                                        MinWidth="160"
+                                        Padding="1"
+                                        MinWidth="140"
                                         SnapsToDevicePixels="True">
-                                    <ScrollViewer CanContentScroll="True">
-                                        <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle"
-                                                    Grid.IsSharedSizeScope="True"/>
-                                    </ScrollViewer>
+                                    <!-- No ScrollViewer — short menus should not show scrollbar chrome -->
+                                    <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle"
+                                                Grid.IsSharedSizeScope="True"/>
                                 </Border>
                             </Popup>
                         </Grid>
                     </Border>
                     <ControlTemplate.Triggers>
+                        <!-- Menu bar labels (File, Edit, …) — snug horizontal spacing only -->
                         <Trigger Property="Role" Value="TopLevelHeader">
                             <Setter TargetName="PART_Popup" Property="Placement" Value="Bottom"/>
                             <Setter TargetName="Arrow" Property="Visibility" Value="Collapsed"/>
-                            <Setter Property="Padding" Value="10,6"/>
+                            <Setter Property="Padding" Value="5,3"/>
+                            <Setter Property="MinHeight" Value="22"/>
+                            <Setter Property="Margin" Value="0"/>
                         </Trigger>
                         <Trigger Property="Role" Value="TopLevelItem">
                             <Setter TargetName="Arrow" Property="Visibility" Value="Collapsed"/>
-                            <Setter Property="Padding" Value="10,6"/>
+                            <Setter Property="Padding" Value="5,3"/>
+                            <Setter Property="MinHeight" Value="22"/>
+                            <Setter Property="Margin" Value="0"/>
                         </Trigger>
                         <Trigger Property="Role" Value="SubmenuHeader">
                             <Setter TargetName="Arrow" Property="Visibility" Value="Visible"/>
+                            <Setter Property="Padding" Value="8,2"/>
+                        </Trigger>
+                        <Trigger Property="Role" Value="SubmenuItem">
+                            <Setter Property="Padding" Value="8,2"/>
+                            <Setter Property="MinHeight" Value="22"/>
                         </Trigger>
                         <Trigger Property="HasItems" Value="False">
                             <Setter TargetName="Arrow" Property="Visibility" Value="Collapsed"/>
@@ -281,13 +291,78 @@
         <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}"/>
         <Setter Property="CaretBrush" Value="{DynamicResource PrimaryTextBrush}"/>
         <Setter Property="SelectionBrush" Value="{DynamicResource ListSelectionBrush}"/>
-        <Style.Triggers>
-            <!-- Read-only fields (e.g. config path) stay themed, not forced white -->
-            <Trigger Property="IsReadOnly" Value="True">
-                <Setter Property="Background" Value="{DynamicResource HeaderBackgroundBrush}"/>
-                <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
-            </Trigger>
-        </Style.Triggers>
+        <!-- Force chrome so Windows does not paint system white over themed brushes -->
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TextBox">
+                    <Border x:Name="Bd"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="2"
+                            SnapsToDevicePixels="True">
+                        <ScrollViewer x:Name="PART_ContentHost"
+                                      Margin="{TemplateBinding Padding}"
+                                      VerticalScrollBarVisibility="{TemplateBinding VerticalScrollBarVisibility}"
+                                      HorizontalScrollBarVisibility="{TemplateBinding HorizontalScrollBarVisibility}"
+                                      Background="Transparent"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.6"/>
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Explicit read-only path field (config path) — own template, never system-white -->
+    <Style x:Key="ReadOnlyPathTextBoxStyle" TargetType="TextBox">
+        <Setter Property="IsReadOnly" Value="True"/>
+        <!-- Face/chrome surface (not classic white Window client area) -->
+        <Setter Property="Background" Value="{DynamicResource HeaderBackgroundBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrushSubtle}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="8,6"/>
+        <Setter Property="Focusable" Value="True"/>
+        <Setter Property="Cursor" Value="IBeam"/>
+        <Setter Property="CaretBrush" Value="{DynamicResource PrimaryTextBrush}"/>
+        <Setter Property="SelectionBrush" Value="{DynamicResource ListSelectionBrush}"/>
+        <Setter Property="ToolTip" Value="Full path to config.json (select &amp; copy if needed)"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TextBox">
+                    <Border x:Name="Bd"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="3"
+                            SnapsToDevicePixels="True">
+                        <ScrollViewer x:Name="PART_ContentHost"
+                                      Margin="{TemplateBinding Padding}"
+                                      Background="Transparent"
+                                      VerticalScrollBarVisibility="{TemplateBinding VerticalScrollBarVisibility}"
+                                      HorizontalScrollBarVisibility="{TemplateBinding HorizontalScrollBarVisibility}"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <Style TargetType="PasswordBox">
@@ -365,7 +440,9 @@
                                     BorderBrush="{DynamicResource BorderBrushSubtle}"
                                     BorderThickness="1"
                                     SnapsToDevicePixels="True">
-                                <ScrollViewer CanContentScroll="True">
+                                <ScrollViewer CanContentScroll="True"
+                                              VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled">
                                     <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Contained"/>
                                 </ScrollViewer>
                             </Border>
@@ -481,6 +558,23 @@
         </Setter>
     </Style>
 
+    <!-- Gripper thumb required for column resize (PART_HeaderGripper) -->
+    <Style x:Key="GridViewColumnHeaderGripper" TargetType="Thumb">
+        <Setter Property="Width" Value="8"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Cursor" Value="SizeWE"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Thumb">
+                    <Border Background="Transparent" Padding="0">
+                        <Rectangle Width="1" HorizontalAlignment="Center"
+                                   Fill="{DynamicResource BorderBrushSubtle}"/>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- Named so ListView can set ColumnHeaderContainerStyle without losing dark chrome -->
     <Style x:Key="ThemedGridViewColumnHeader" TargetType="GridViewColumnHeader">
         <Setter Property="Background" Value="{DynamicResource HeaderBackgroundBrush}"/>
@@ -491,23 +585,29 @@
         <Setter Property="HorizontalContentAlignment" Value="Left"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="ToolTip" Value="Click to sort"/>
+        <Setter Property="ToolTip" Value="Click to sort · drag edge to resize"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="GridViewColumnHeader">
-                    <Border x:Name="Bd"
-                            Background="{DynamicResource HeaderBackgroundBrush}"
-                            BorderBrush="{DynamicResource BorderBrushSubtle}"
-                            BorderThickness="0,0,1,1"
-                            Padding="{TemplateBinding Padding}"
-                            SnapsToDevicePixels="True">
-                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                          VerticalAlignment="Center"
-                                          RecognizesAccessKey="True"
-                                          TextElement.Foreground="{DynamicResource PrimaryTextBrush}"
-                                          TextElement.FontWeight="SemiBold"/>
-                    </Border>
+                    <Grid SnapsToDevicePixels="True">
+                        <Border x:Name="Bd"
+                                Background="{DynamicResource HeaderBackgroundBrush}"
+                                BorderBrush="{DynamicResource BorderBrushSubtle}"
+                                BorderThickness="0,0,1,1"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="Center"
+                                              RecognizesAccessKey="True"
+                                              TextElement.Foreground="{DynamicResource PrimaryTextBrush}"
+                                              TextElement.FontWeight="SemiBold"/>
+                        </Border>
+                        <!-- Required for WPF column resize -->
+                        <Thumb x:Name="PART_HeaderGripper"
+                               HorizontalAlignment="Right"
+                               Margin="0,0,-4,0"
+                               Style="{StaticResource GridViewColumnHeaderGripper}"/>
+                    </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlHoverBrush}"/>
@@ -518,6 +618,7 @@
                         <Trigger Property="Role" Value="Padding">
                             <Setter TargetName="Bd" Property="BorderThickness" Value="0,0,0,1"/>
                             <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HeaderBackgroundBrush}"/>
+                            <Setter TargetName="PART_HeaderGripper" Property="Visibility" Value="Collapsed"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>

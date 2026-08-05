@@ -51,9 +51,13 @@
                 <MenuItem Header="_Update selected" Command="{Binding UpdateSelectedCommand}"/>
                 <MenuItem Header="Update _all available" Command="{Binding UpdateAllCommand}"/>
                 <Separator/>
-                <MenuItem Header="Show update _history" Command="{Binding ShowUpdateHistoryCommand}"
-                          ToolTip="Drivers / Windows Updates tabs: show installed update history"/>
-                <MenuItem Header="_Back to available updates" Command="{Binding BackToAvailableUpdatesCommand}"/>
+                <MenuItem Header="Search packages to _install" Command="{Binding SearchCatalogCommand}"/>
+                <MenuItem Header="Install s_elected" Command="{Binding InstallSelectedCommand}"/>
+                <MenuItem Header="_Load installed (uninstall)" Command="{Binding LoadUninstallListCommand}"/>
+                <MenuItem Header="Un_install selected" Command="{Binding UninstallSelectedCommand}"/>
+                <Separator/>
+                <MenuItem Header="Show update _history" Command="{Binding ShowUpdateHistoryCommand}"/>
+                <MenuItem Header="_Back from history" Command="{Binding BackToAvailableUpdatesCommand}"/>
                 <Separator/>
                 <MenuItem Header="Create daily schedule..." Command="{Binding CreateScheduleCommand}"/>
                 <MenuItem Header="Remove schedule" Command="{Binding RemoveScheduleCommand}"/>
@@ -70,31 +74,63 @@
             </MenuItem>
         </Menu>
 
-        <!-- Toolbar -->
+        <!-- Toolbar (actions change with tab via visibility) -->
         <Border DockPanel.Dock="Top" Background="{DynamicResource PanelBackgroundBrush}"
                 BorderBrush="{DynamicResource BorderBrushSubtle}" BorderThickness="0,0,0,1" Padding="6,4">
             <DockPanel>
-                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
+                <!-- Update tabs -->
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left"
+                            Visibility="{Binding IsUpdateTab, Converter={StaticResource BoolToVisibility}}">
                     <Button Content="Scan" Style="{StaticResource ToolbarButtonStyle}"
-                            Command="{Binding ScanCommand}" ToolTip="Scan installed programs (F5)"/>
+                            Command="{Binding ScanCommand}" ToolTip="Scan (F5)"/>
                     <Button Content="Check updates" Style="{StaticResource PrimaryButtonStyle}"
-                            Command="{Binding CheckUpdatesCommand}" ToolTip="Check for available updates (F6)"/>
+                            Command="{Binding CheckUpdatesCommand}" ToolTip="Check for updates (F6)"/>
                     <Rectangle Width="1" Fill="{DynamicResource BorderBrushSubtle}" Margin="8,4"/>
                     <Button Content="Update selected" Style="{StaticResource ToolbarButtonStyle}"
-                            Command="{Binding UpdateSelectedCommand}" ToolTip="Install updates for selected programs"/>
+                            Command="{Binding UpdateSelectedCommand}"/>
                     <Button Content="Update all" Style="{StaticResource ToolbarButtonStyle}"
-                            Command="{Binding UpdateAllCommand}" ToolTip="Install all available updates"/>
+                            Command="{Binding UpdateAllCommand}"/>
                     <Rectangle Width="1" Fill="{DynamicResource BorderBrushSubtle}" Margin="8,4"/>
                     <Button Content="Options" Style="{StaticResource ToolbarButtonStyle}"
-                            Click="Options_Click" ToolTip="Open settings"/>
+                            Click="Options_Click"/>
+                </StackPanel>
+
+                <!-- Install tab -->
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left"
+                            Visibility="{Binding IsInstallTab, Converter={StaticResource BoolToVisibility}}">
+                    <TextBlock Text="Package:" VerticalAlignment="Center" Margin="0,0,6,0"
+                               Style="{StaticResource MutedTextStyle}"/>
+                    <TextBox Width="260" VerticalAlignment="Center"
+                             Text="{Binding CatalogQuery, UpdateSourceTrigger=PropertyChanged}"
+                             ToolTip="Search winget catalog by name or ID"/>
+                    <Button Content="Search" Style="{StaticResource PrimaryButtonStyle}" Margin="6,0,0,0"
+                            Command="{Binding SearchCatalogCommand}"/>
+                    <Button Content="Install selected" Style="{StaticResource ToolbarButtonStyle}" Margin="4,0,0,0"
+                            Command="{Binding InstallSelectedCommand}"/>
+                    <Rectangle Width="1" Fill="{DynamicResource BorderBrushSubtle}" Margin="8,4"/>
+                    <Button Content="Options" Style="{StaticResource ToolbarButtonStyle}"
+                            Click="Options_Click"/>
+                </StackPanel>
+
+                <!-- Uninstall tab -->
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left"
+                            Visibility="{Binding IsUninstallTab, Converter={StaticResource BoolToVisibility}}">
+                    <Button Content="Load installed" Style="{StaticResource PrimaryButtonStyle}"
+                            Command="{Binding LoadUninstallListCommand}"
+                            ToolTip="List packages installed via winget"/>
+                    <Button Content="Uninstall selected" Style="{StaticResource ToolbarButtonStyle}"
+                            Command="{Binding UninstallSelectedCommand}"/>
+                    <Rectangle Width="1" Fill="{DynamicResource BorderBrushSubtle}" Margin="8,4"/>
+                    <Button Content="Options" Style="{StaticResource ToolbarButtonStyle}"
+                            Click="Options_Click"/>
                 </StackPanel>
 
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
-                    <TextBlock Text="Search:" VerticalAlignment="Center" Margin="0,0,6,0"
+                    <TextBlock Text="Filter:" VerticalAlignment="Center" Margin="0,0,6,0"
                                Style="{StaticResource MutedTextStyle}"/>
-                    <TextBox Width="220" VerticalAlignment="Center"
+                    <TextBox Width="200" VerticalAlignment="Center"
                              Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
-                             ToolTip="Filter by name, package ID, publisher, or source"/>
+                             ToolTip="Filter the current list"/>
                 </StackPanel>
             </DockPanel>
         </Border>
@@ -103,7 +139,6 @@
         <StatusBar DockPanel.Dock="Bottom">
             <StatusBarItem>
                 <StackPanel Orientation="Horizontal">
-                    <!-- Compact spinner in status bar -->
                     <Grid Width="16" Height="16" Margin="0,0,8,0"
                           Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}}">
                         <Ellipse Width="14" Height="14" Stroke="{DynamicResource AccentBrush}" StrokeThickness="2"
@@ -123,7 +158,7 @@
                             </Ellipse.Triggers>
                         </Ellipse>
                     </Grid>
-                    <TextBlock Text="{Binding StatusText}" MinWidth="220" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding StatusText}" MinWidth="200" VerticalAlignment="Center"/>
                 </StackPanel>
             </StatusBarItem>
             <Separator/>
@@ -137,7 +172,7 @@
                                VerticalAlignment="Center" FontWeight="SemiBold"
                                Foreground="{DynamicResource AccentBrush}"
                                Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}}"/>
-                    <ProgressBar Width="160" Height="14"
+                    <ProgressBar Width="140" Height="14"
                                  Minimum="0" Maximum="100"
                                  Value="{Binding ProgressValue}"
                                  IsIndeterminate="{Binding IsProgressIndeterminate}"/>
@@ -150,33 +185,28 @@
             </StatusBarItem>
         </StatusBar>
 
-        <!-- Main content — explicit window background so dark mode fills toolbar strips -->
         <Grid Margin="0" Background="{DynamicResource WindowBackgroundBrush}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
-                <RowDefinition Height="180"/>
+                <RowDefinition Height="140"/>
             </Grid.RowDefinitions>
 
             <Border Grid.Row="0"
                     Background="{DynamicResource WindowBackgroundBrush}"
-                    Padding="10,8,10,8"
+                    Padding="10,6,10,6"
                     BorderBrush="{DynamicResource BorderBrushSubtle}"
                     BorderThickness="0,0,0,1">
-                <DockPanel>
-                    <StackPanel Orientation="Horizontal">
-                        <Button Content="Select all" Style="{StaticResource ToolbarButtonStyle}" Command="{Binding SelectAllCommand}"/>
-                        <Button Content="Select none" Style="{StaticResource ToolbarButtonStyle}" Command="{Binding SelectNoneCommand}"/>
-                        <Button Content="Select updates" Style="{StaticResource ToolbarButtonStyle}" Command="{Binding SelectUpdatesOnlyCommand}"/>
-                        <CheckBox Content="Show updates only" Margin="12,0,0,0"
-                                  IsChecked="{Binding ShowUpdatesOnly}" VerticalAlignment="Center"/>
-                    </StackPanel>
-                    <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right"
-                               VerticalAlignment="Center"
-                               Text="{Binding UpdateCount, StringFormat={}{0} update(s) available}"
-                               FontWeight="SemiBold"
-                               Foreground="{DynamicResource AccentBrush}"/>
-                </DockPanel>
+                <StackPanel Orientation="Horizontal">
+                    <Button Content="Select all" Style="{StaticResource ToolbarButtonStyle}" Command="{Binding SelectAllCommand}"/>
+                    <Button Content="Select none" Style="{StaticResource ToolbarButtonStyle}" Command="{Binding SelectNoneCommand}"/>
+                    <Button Content="Select updates" Style="{StaticResource ToolbarButtonStyle}"
+                            Command="{Binding SelectUpdatesOnlyCommand}"
+                            Visibility="{Binding IsUpdateTab, Converter={StaticResource BoolToVisibility}}"/>
+                    <CheckBox Content="Show updates only" Margin="12,0,0,0"
+                              IsChecked="{Binding ShowUpdatesOnly}" VerticalAlignment="Center"
+                              Visibility="{Binding IsUpdateTab, Converter={StaticResource BoolToVisibility}}"/>
+                </StackPanel>
             </Border>
 
             <DockPanel Grid.Row="1" Margin="10,8,10,0" Background="{DynamicResource WindowBackgroundBrush}">
@@ -185,9 +215,11 @@
                             Margin="0,0,0,6"
                             Background="{DynamicResource WindowBackgroundBrush}"
                             BorderThickness="0">
-                    <TabItem Header="Programs (winget / Chocolatey / GitHub)"/>
+                    <TabItem Header="Programs"/>
                     <TabItem Header="Drivers"/>
-                    <TabItem Header="Windows Updates / CVE"/>
+                    <TabItem Header="Windows Update"/>
+                    <TabItem Header="Install"/>
+                    <TabItem Header="Uninstall"/>
                 </TabControl>
 
                 <Border Background="{DynamicResource PanelBackgroundBrush}"
@@ -200,6 +232,8 @@
                                   SelectionMode="Extended"
                                   VirtualizingPanel.IsVirtualizing="True"
                                   VirtualizingPanel.VirtualizationMode="Recycling"
+                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                  ScrollViewer.VerticalScrollBarVisibility="Auto"
                                   GridViewColumnHeader.Click="ProgramList_ColumnHeader_Click"
                                   PreviewMouseRightButtonDown="ProgramList_PreviewMouseRightButtonDown"
                                   ContextMenuOpening="ProgramList_ContextMenuOpening">
@@ -245,14 +279,14 @@
                                             </DataTemplate>
                                         </GridViewColumn.CellTemplate>
                                     </GridViewColumn>
-                                    <GridViewColumn Header="Current" Width="100">
+                                    <GridViewColumn Header="Current version" Width="120">
                                         <GridViewColumn.CellTemplate>
                                             <DataTemplate>
                                                 <TextBlock Text="{Binding Version}" Foreground="{DynamicResource PrimaryTextBrush}"/>
                                             </DataTemplate>
                                         </GridViewColumn.CellTemplate>
                                     </GridViewColumn>
-                                    <GridViewColumn Header="Available" Width="100">
+                                    <GridViewColumn Header="Available version" Width="120">
                                         <GridViewColumn.CellTemplate>
                                             <DataTemplate>
                                                 <TextBlock Text="{Binding AvailableVersion}" Foreground="{DynamicResource PrimaryTextBrush}"/>
@@ -322,31 +356,39 @@
                             </ListView.View>
                         </ListView>
 
-                        <!-- Empty state: no updates + history button on Drivers / Windows Update tabs -->
+                        <!-- Empty state -->
                         <Border Background="{DynamicResource PanelBackgroundBrush}"
                                 Visibility="{Binding ShowEmptyState, Converter={StaticResource BoolToVisibility}}"
                                 IsHitTestVisible="True">
-                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="440">
+                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="420">
                                 <TextBlock Text="{Binding EmptyStateTitle}"
-                                           FontSize="18" FontWeight="SemiBold"
+                                           FontSize="16" FontWeight="SemiBold"
                                            HorizontalAlignment="Center"
                                            TextAlignment="Center"
                                            Foreground="{DynamicResource PrimaryTextBrush}"/>
                                 <TextBlock Text="{Binding EmptyStateDetail}"
-                                           Margin="0,10,0,0"
+                                           Margin="0,8,0,0"
                                            TextAlignment="Center"
                                            TextWrapping="Wrap"
                                            HorizontalAlignment="Center"
                                            Style="{StaticResource MutedTextStyle}"/>
-                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,18,0,0">
-                                    <Button Content="Show update history"
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,16,0,0">
+                                    <Button Content="Show history"
                                             Style="{StaticResource PrimaryButtonStyle}"
                                             Command="{Binding ShowUpdateHistoryCommand}"
-                                            Visibility="{Binding ShowHistoryButton, Converter={StaticResource BoolToVisibility}}"
-                                            ToolTip="Browse successfully installed updates from Windows Update history"/>
-                                    <Button Content="Scan again" Margin="10,0,0,0"
+                                            Visibility="{Binding ShowHistoryButton, Converter={StaticResource BoolToVisibility}}"/>
+                                    <Button Content="Search packages"
+                                            Style="{StaticResource PrimaryButtonStyle}"
+                                            Command="{Binding SearchCatalogCommand}"
+                                            Visibility="{Binding IsInstallTab, Converter={StaticResource BoolToVisibility}}"/>
+                                    <Button Content="Load installed"
+                                            Style="{StaticResource PrimaryButtonStyle}"
+                                            Command="{Binding LoadUninstallListCommand}"
+                                            Visibility="{Binding IsUninstallTab, Converter={StaticResource BoolToVisibility}}"/>
+                                    <Button Content="Scan" Margin="8,0,0,0"
                                             Style="{StaticResource ToolbarButtonStyle}"
-                                            Command="{Binding ScanCommand}"/>
+                                            Command="{Binding ScanCommand}"
+                                            Visibility="{Binding IsUpdateTab, Converter={StaticResource BoolToVisibility}}"/>
                                 </StackPanel>
                             </StackPanel>
                         </Border>
@@ -360,10 +402,10 @@
                                 Visibility="{Binding IsShowingHistory, Converter={StaticResource BoolToVisibility}}">
                             <DockPanel>
                                 <Button DockPanel.Dock="Right"
-                                        Content="Back to available updates"
+                                        Content="Back"
                                         Style="{StaticResource ToolbarButtonStyle}"
                                         Command="{Binding BackToAvailableUpdatesCommand}"/>
-                                <TextBlock Text="Showing installed update history (not pending updates)"
+                                <TextBlock Text="History view"
                                            VerticalAlignment="Center"
                                            Foreground="{DynamicResource PrimaryTextBrush}"/>
                             </DockPanel>
@@ -373,7 +415,6 @@
                                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}}"
                                 IsHitTestVisible="True">
                             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                                <!-- Spinning swirl (primary busy indicator) -->
                                 <Grid Width="56" Height="56" Margin="0,0,0,10" HorizontalAlignment="Center">
                                     <Ellipse Width="50" Height="50"
                                              Stroke="{DynamicResource AccentBrush}"
@@ -405,7 +446,6 @@
                                         </Ellipse.Style>
                                     </Ellipse>
                                 </Grid>
-                                <!-- Percentage under the swirl, smaller text -->
                                 <TextBlock Text="{Binding ProgressPercentText}"
                                            FontSize="16" FontWeight="SemiBold"
                                            HorizontalAlignment="Center"
@@ -421,17 +461,13 @@
                                              Minimum="0" Maximum="100"
                                              Value="{Binding ProgressValue}"
                                              IsIndeterminate="{Binding IsProgressIndeterminate}"/>
-                                <TextBlock Text="Working… you can Cancel from the status bar."
-                                           Margin="0,10,0,0"
-                                           Style="{StaticResource MutedTextStyle}"
-                                           HorizontalAlignment="Center"/>
                             </StackPanel>
                         </Border>
                     </Grid>
                 </Border>
             </DockPanel>
 
-            <GroupBox Grid.Row="2" Header="Activity log" Margin="10,10,10,10"
+            <GroupBox Grid.Row="2" Header="Log" Margin="10,8,10,10"
                       Background="{DynamicResource PanelBackgroundBrush}">
                 <DockPanel>
                     <Button DockPanel.Dock="Top" HorizontalAlignment="Right"
@@ -442,7 +478,7 @@
                              BorderThickness="0"
                              FontFamily="{StaticResource AppFontMono}"
                              FontSize="11"
-                             ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              ScrollViewer.VerticalScrollBarVisibility="Auto">
                         <ListBox.ItemContainerStyle>
                             <Style TargetType="ListBoxItem">

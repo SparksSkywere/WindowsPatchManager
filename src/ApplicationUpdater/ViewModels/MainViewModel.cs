@@ -22,14 +22,19 @@ public partial class MainViewModel : ObservableObject
     public ObservableCollection<ProgramItemViewModel> Programs { get; } = [];
     public ObservableCollection<ProgramItemViewModel> Drivers { get; } = [];
     public ObservableCollection<ProgramItemViewModel> WindowsUpdates { get; } = [];
+    public ObservableCollection<ProgramItemViewModel> InstallResults { get; } = [];
+    public ObservableCollection<ProgramItemViewModel> UninstallList { get; } = [];
     public ObservableCollection<string> LogEntries { get; } = [];
 
     public ICollectionView ProgramsView { get; }
     public ICollectionView DriversView { get; }
     public ICollectionView WindowsUpdatesView { get; }
+    public ICollectionView InstallResultsView { get; }
+    public ICollectionView UninstallListView { get; }
 
     [ObservableProperty] private string _statusText = "Ready";
     [ObservableProperty] private string _searchText = string.Empty;
+    [ObservableProperty] private string _catalogQuery = string.Empty;
     [ObservableProperty] private bool _showUpdatesOnly;
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private double _progressValue;
@@ -44,8 +49,11 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _isShowingHistory;
     [ObservableProperty] private bool _showEmptyState;
     [ObservableProperty] private string _emptyStateTitle = "No updates available";
-    [ObservableProperty] private string _emptyStateDetail = "Run Scan or Check updates to search again.";
+    [ObservableProperty] private string _emptyStateDetail = "Run Scan or Check updates.";
     [ObservableProperty] private bool _showHistoryButton;
+    [ObservableProperty] private bool _isUpdateTab = true;
+    [ObservableProperty] private bool _isInstallTab;
+    [ObservableProperty] private bool _isUninstallTab;
 
     public MainViewModel(PatchManagerService patchManager, SchedulerService scheduler, LogService log)
     {
@@ -67,6 +75,14 @@ public partial class MainViewModel : ObservableObject
         WindowsUpdatesView.Filter = FilterProgram;
         WindowsUpdatesView.SortDescriptions.Add(new SortDescription(nameof(ProgramItemViewModel.Name), ListSortDirection.Ascending));
 
+        InstallResultsView = CollectionViewSource.GetDefaultView(InstallResults);
+        InstallResultsView.Filter = FilterProgram;
+        InstallResultsView.SortDescriptions.Add(new SortDescription(nameof(ProgramItemViewModel.Name), ListSortDirection.Ascending));
+
+        UninstallListView = CollectionViewSource.GetDefaultView(UninstallList);
+        UninstallListView.Filter = FilterProgram;
+        UninstallListView.SortDescriptions.Add(new SortDescription(nameof(ProgramItemViewModel.Name), ListSortDirection.Ascending));
+
         _log.MessageLogged += (_, line) => UiThread.Post(() =>
         {
             LogEntries.Add(line);
@@ -79,14 +95,18 @@ public partial class MainViewModel : ObservableObject
     {
         1 => Drivers,
         2 => WindowsUpdates,
+        3 => InstallResults,
+        4 => UninstallList,
         _ => Programs
     };
 
-    /// <summary>Bound list for the selected tab (Programs / Drivers / Windows Updates).</summary>
+    /// <summary>Bound list for the selected tab.</summary>
     public ICollectionView ActiveView => SelectedTabIndex switch
     {
         1 => DriversView,
         2 => WindowsUpdatesView,
+        3 => InstallResultsView,
+        4 => UninstallListView,
         _ => ProgramsView
     };
 
@@ -96,6 +116,8 @@ public partial class MainViewModel : ObservableObject
             ProgramsView.Refresh();
             DriversView.Refresh();
             WindowsUpdatesView.Refresh();
+            InstallResultsView.Refresh();
+            UninstallListView.Refresh();
         });
 
     partial void OnShowUpdatesOnlyChanged(bool value)
@@ -111,21 +133,25 @@ public partial class MainViewModel : ObservableObject
         });
     }
 
-    partial void OnSelectedTabIndexChanged(int value) =>
-        UiThread.Post(() =>
-        {
-            IsShowingHistory = false;
-            OnPropertyChanged(nameof(ActiveView));
-            RefreshSummary();
-            UpdateEmptyState();
-        });
+    partial void OnSelectedTabIndexChanged(int value)
+    {
+        // Tab switch only updates the bound list — no automatic re-scan (initial scan on load covers apps/drivers/WU).
+        IsShowingHistory = false;
+        IsUpdateTab = value is 0 or 1 or 2;
+        IsInstallTab = value == 3;
+        IsUninstallTab = value == 4;
+        OnPropertyChanged(nameof(ActiveView));
+        RefreshSummary();
+        UpdateEmptyState();
+    }
 
     private bool FilterProgram(object obj)
     {
         if (obj is not ProgramItemViewModel item)
             return false;
 
-        if (ShowUpdatesOnly && !item.UpdateAvailable)
+        // "Show updates only" only applies to update tabs
+        if (IsUpdateTab && ShowUpdatesOnly && !item.UpdateAvailable)
             return false;
 
         if (string.IsNullOrWhiteSpace(SearchText))
@@ -144,15 +170,51 @@ public partial class MainViewModel : ObservableObject
     {
         ShowUpdatesOnly = _patchManager.Config.Config.General.ShowOnlyUpdatable;
         _log.Info("Windows Patch Manager started.");
-        await ScanAsync().ConfigureAwait(true);
+        // Initial scan populates Applications, Drivers, and Windows Update together.
+        await ScanAllUpdateTabsAsync().ConfigureAwait(true);
         if (_patchManager.Config.Config.General.AutoCheckUpdates)
             await CheckUpdatesAsync().ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// Scans applications + drivers + Windows Update (used on launch and from Applications Scan).
+    /// </summary>
+    private async Task ScanAllUpdateTabsAsync()
+    {
+        IsShowingHistory = false;
+        await RunBusyAsync("Scanning applications, drivers & Windows Update…", async (ct, progress) =>
+        {
+            progress.Report(new ScanProgress { Message = "Scanning applications…", Percent = 5 });
+            var apps = await _patchManager.ScanAsync(progress, ct).ConfigureAwait(false);
+            UiThread.Send(() => ReplaceList(Programs, apps));
+
+            progress.Report(new ScanProgress { Message = "Scanning drivers…", Percent = 45 });
+            var drivers = await _patchManager.ScanDriversAsync(progress, ct).ConfigureAwait(false);
+            UiThread.Send(() => ReplaceList(Drivers, drivers));
+
+            progress.Report(new ScanProgress { Message = "Scanning Windows Update…", Percent = 75 });
+            var wu = await _patchManager.ScanWindowsUpdatesAsync(progress, ct).ConfigureAwait(false);
+            UiThread.Send(() =>
+            {
+                ReplaceList(WindowsUpdates, wu);
+                StatusText =
+                    $"Scan complete · {Programs.Count} apps · {Drivers.Count} drivers · {WindowsUpdates.Count} Windows updates";
+            });
+        }).ConfigureAwait(true);
     }
 
     [RelayCommand(CanExecute = nameof(CanRun))]
     private async Task ScanAsync()
     {
         IsShowingHistory = false;
+
+        // Applications tab (and initial intent): refresh all three update surfaces.
+        if (SelectedTabIndex is 0)
+        {
+            await ScanAllUpdateTabsAsync().ConfigureAwait(true);
+            return;
+        }
+
         await RunBusyAsync("Scanning…", async (ct, progress) =>
         {
             if (SelectedTabIndex == 1)
@@ -165,11 +227,185 @@ public partial class MainViewModel : ObservableObject
                 var list = await _patchManager.ScanWindowsUpdatesAsync(progress, ct).ConfigureAwait(false);
                 UiThread.Send(() => ReplaceList(WindowsUpdates, list));
             }
+            else if (SelectedTabIndex == 4)
+            {
+                var list = await _patchManager.ListWingetInstalledAsync(ct).ConfigureAwait(false);
+                UiThread.Send(() => ReplaceList(UninstallList, list));
+            }
+            else if (SelectedTabIndex == 3)
+            {
+                // Install tab: scan is catalog search via CatalogQuery
+                await SearchCatalogInternalAsync(ct, progress).ConfigureAwait(false);
+            }
             else
             {
                 var list = await _patchManager.ScanAsync(progress, ct).ConfigureAwait(false);
                 UiThread.Send(() => ReplaceList(Programs, list));
             }
+        }).ConfigureAwait(true);
+    }
+
+    [RelayCommand(CanExecute = nameof(CanRun))]
+    private async Task SearchCatalogAsync()
+    {
+        if (SelectedTabIndex != 3)
+            SelectedTabIndex = 3;
+
+        await RunBusyAsync("Searching winget…", async (ct, progress) =>
+        {
+            await SearchCatalogInternalAsync(ct, progress).ConfigureAwait(false);
+        }).ConfigureAwait(true);
+    }
+
+    private async Task SearchCatalogInternalAsync(CancellationToken ct, IProgress<ScanProgress> progress)
+    {
+        var q = !string.IsNullOrWhiteSpace(CatalogQuery) ? CatalogQuery : SearchText;
+        if (string.IsNullOrWhiteSpace(q))
+        {
+            UiThread.Send(() =>
+            {
+                StatusText = "Enter a package name or ID to search winget";
+                UpdateEmptyState();
+            });
+            return;
+        }
+
+        progress.Report(new ScanProgress { Message = $"Searching winget for \"{q.Trim()}\"…", Percent = 20 });
+        var list = await _patchManager.SearchWingetAsync(q.Trim(), ct).ConfigureAwait(false);
+        UiThread.Send(() =>
+        {
+            ReplaceList(InstallResults, list);
+            StatusText = list.Count == 0
+                ? $"No winget packages matched \"{q.Trim()}\""
+                : $"Found {list.Count} package(s)";
+        });
+    }
+
+    [RelayCommand(CanExecute = nameof(CanRun))]
+    private async Task InstallSelectedAsync()
+    {
+        if (SelectedTabIndex != 3)
+            SelectedTabIndex = 3;
+
+        var selected = InstallResults.Where(p => p.IsSelected).Select(p => p.Model).ToList();
+        if (selected.Count == 0)
+        {
+            MessageBox.Show(
+                "Select one or more packages from the Install tab search results.",
+                "Install",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        await RunBusyAsync($"Installing {selected.Count} package(s)…", async (ct, _) =>
+        {
+            var done = 0;
+            foreach (var program in selected)
+            {
+                ct.ThrowIfCancellationRequested();
+                UiThread.Post(() =>
+                {
+                    SetDeterminateProgress(done * 100.0 / selected.Count, $"Installing {program.Name}…");
+                    BusyOverlayText = $"Installing {program.Name}\n{done + 1} of {selected.Count}";
+                });
+
+                var result = await _patchManager.InstallPackageAsync(program, ct).ConfigureAwait(false);
+                if (result.Success)
+                    _log.Success($"Installed {program.Name}");
+                else
+                    _log.Error($"Install failed {program.Name}: {result.ErrorMessage}");
+                done++;
+            }
+
+            UiThread.Send(() => StatusText = $"Install finished ({done} package(s))");
+        }).ConfigureAwait(true);
+    }
+
+    [RelayCommand(CanExecute = nameof(CanRun))]
+    private async Task LoadUninstallListAsync()
+    {
+        if (SelectedTabIndex != 4)
+            SelectedTabIndex = 4;
+
+        await RunBusyAsync("Loading installed packages…", async (ct, progress) =>
+        {
+            progress.Report(new ScanProgress { Message = "Listing winget packages…", Percent = 30 });
+            var list = await _patchManager.ListWingetInstalledAsync(ct).ConfigureAwait(false);
+            UiThread.Send(() =>
+            {
+                ReplaceList(UninstallList, list);
+                StatusText = $"Loaded {list.Count} installed package(s)";
+            });
+        }).ConfigureAwait(true);
+    }
+
+    [RelayCommand(CanExecute = nameof(CanRun))]
+    private async Task UninstallSelectedAsync()
+    {
+        if (SelectedTabIndex != 4)
+            SelectedTabIndex = 4;
+
+        var selected = UninstallList.Where(p => p.IsSelected).Select(p => p.Model).ToList();
+        if (selected.Count == 0)
+        {
+            MessageBox.Show(
+                "Select one or more installed packages to uninstall.",
+                "Uninstall",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        var confirm = MessageBox.Show(
+            $"Uninstall {selected.Count} package(s)?\n\n{string.Join("\n", selected.Take(8).Select(p => "• " + p.Name))}" +
+            (selected.Count > 8 ? $"\n… and {selected.Count - 8} more" : string.Empty),
+            "Confirm uninstall",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+        if (confirm != MessageBoxResult.Yes)
+            return;
+
+        await RunBusyAsync($"Uninstalling {selected.Count} package(s)…", async (ct, _) =>
+        {
+            var done = 0;
+            var removed = new List<string>();
+            foreach (var program in selected)
+            {
+                ct.ThrowIfCancellationRequested();
+                UiThread.Post(() =>
+                {
+                    SetDeterminateProgress(done * 100.0 / selected.Count, $"Uninstalling {program.Name}…");
+                    BusyOverlayText = $"Uninstalling {program.Name}\n{done + 1} of {selected.Count}";
+                });
+
+                var result = await _patchManager.UninstallPackageAsync(program, ct).ConfigureAwait(false);
+                if (result.Success)
+                {
+                    removed.Add(program.PackageId);
+                    _log.Success($"Uninstalled {program.Name}");
+                }
+                else
+                    _log.Error($"Uninstall failed {program.Name}: {result.ErrorMessage}");
+                done++;
+            }
+
+            UiThread.Send(() =>
+            {
+                foreach (var id in removed)
+                {
+                    var item = UninstallList.FirstOrDefault(p =>
+                        string.Equals(p.PackageId, id, StringComparison.OrdinalIgnoreCase));
+                    if (item is not null)
+                        UninstallList.Remove(item);
+                }
+
+                UninstallListView.Refresh();
+                StatusText = $"Uninstall finished ({removed.Count} removed)";
+                RefreshSummary();
+                UpdateEmptyState();
+            });
         }).ConfigureAwait(true);
     }
 
@@ -577,6 +813,10 @@ public partial class MainViewModel : ObservableObject
         UpdateAllCommand.NotifyCanExecuteChanged();
         ShowUpdateHistoryCommand.NotifyCanExecuteChanged();
         BackToAvailableUpdatesCommand.NotifyCanExecuteChanged();
+        SearchCatalogCommand.NotifyCanExecuteChanged();
+        InstallSelectedCommand.NotifyCanExecuteChanged();
+        LoadUninstallListCommand.NotifyCanExecuteChanged();
+        UninstallSelectedCommand.NotifyCanExecuteChanged();
     }
 
     private void ReplaceList(ObservableCollection<ProgramItemViewModel> target, IReadOnlyList<ProgramInfo> list)
@@ -597,8 +837,12 @@ public partial class MainViewModel : ObservableObject
             ProgramsView.Refresh();
         else if (ReferenceEquals(target, Drivers))
             DriversView.Refresh();
-        else
+        else if (ReferenceEquals(target, WindowsUpdates))
             WindowsUpdatesView.Refresh();
+        else if (ReferenceEquals(target, InstallResults))
+            InstallResultsView.Refresh();
+        else if (ReferenceEquals(target, UninstallList))
+            UninstallListView.Refresh();
 
         RefreshSummary();
         UpdateEmptyState();
@@ -610,28 +854,49 @@ public partial class MainViewModel : ObservableObject
         RefreshSummary();
     }
 
+    private int CountVisible()
+    {
+        var n = 0;
+        foreach (var _ in ActiveView)
+            n++;
+        return n;
+    }
+
     private void RefreshSummary()
     {
         TotalCount = ActiveList.Count;
         UpdateCount = ActiveList.Count(p => p.UpdateAvailable);
         SelectedCount = ActiveList.Count(p => p.IsSelected);
-        var tab = SelectedTabIndex switch
+        var visible = CountVisible();
+
+        SummaryText = SelectedTabIndex switch
         {
-            1 => IsShowingHistory ? "driver history" : "drivers",
-            2 => IsShowingHistory ? "Windows update history" : "Windows updates",
-            _ => "programs"
+            1 => IsShowingHistory
+                ? $"{visible} driver history · {SelectedCount} selected"
+                : $"{visible} drivers · {UpdateCount} updates · {SelectedCount} selected",
+            2 => IsShowingHistory
+                ? $"{visible} update history · {SelectedCount} selected"
+                : $"{visible} Windows updates · {UpdateCount} pending · {SelectedCount} selected",
+            3 => $"{visible} search results · {SelectedCount} selected",
+            4 => $"{visible} installed · {SelectedCount} selected",
+            _ => ShowUpdatesOnly && TotalCount > 0
+                ? $"{visible} shown · {TotalCount} total · {UpdateCount} updates · {SelectedCount} selected"
+                : $"{visible} programs · {UpdateCount} updates · {SelectedCount} selected"
         };
-        SummaryText = IsShowingHistory
-            ? $"{TotalCount} installed {tab} · history view"
-            : $"{TotalCount} {tab} · {UpdateCount} update(s) available · {SelectedCount} selected";
-        if (string.IsNullOrWhiteSpace(StatusText) || StatusText is "Ready" or "Error")
-            StatusText = SummaryText;
         UpdateEmptyState();
     }
 
     private void UpdateEmptyState()
     {
-        var empty = !IsBusy && ActiveList.Count == 0;
+        if (IsBusy)
+        {
+            ShowEmptyState = false;
+            return;
+        }
+
+        var visible = CountVisible();
+        // Empty list OR filter hides everything (e.g. Show updates only with 0 updates)
+        var empty = visible == 0;
         ShowEmptyState = empty;
 
         if (!empty)
@@ -643,22 +908,43 @@ public partial class MainViewModel : ObservableObject
         switch (SelectedTabIndex)
         {
             case 1:
-                EmptyStateTitle = IsShowingHistory ? "No driver history found" : "No driver updates available";
+                EmptyStateTitle = IsShowingHistory ? "No driver history" : "No driver updates available";
                 EmptyStateDetail = IsShowingHistory
-                    ? "Windows Update has no successful driver installations in history on this PC."
-                    : "Your drivers look up to date, or Windows Update returned no driver packages.\nYou can still browse installed driver updates from history.";
+                    ? "No successful driver installs found in Windows Update history."
+                    : "Nothing pending. You can open update history below.";
                 ShowHistoryButton = !IsShowingHistory;
                 break;
             case 2:
-                EmptyStateTitle = IsShowingHistory ? "No Windows Update history found" : "No Windows updates available";
+                EmptyStateTitle = IsShowingHistory ? "No update history" : "No Windows updates available";
                 EmptyStateDetail = IsShowingHistory
-                    ? "Windows Update has no successful software installations in history on this PC."
-                    : "This PC has no pending Windows / CVE updates right now.\nYou can browse previously installed updates from history.";
+                    ? "No successful installs found in Windows Update history."
+                    : "Nothing pending. You can open update history below.";
                 ShowHistoryButton = !IsShowingHistory;
                 break;
+            case 3:
+                EmptyStateTitle = "Search packages to install";
+                EmptyStateDetail = "Enter a name or package ID in the catalog box, then Search.";
+                ShowHistoryButton = false;
+                break;
+            case 4:
+                EmptyStateTitle = "No packages loaded";
+                EmptyStateDetail = "Click Load installed to list winget packages you can uninstall.";
+                ShowHistoryButton = false;
+                break;
             default:
-                EmptyStateTitle = "No programs loaded";
-                EmptyStateDetail = "Click Scan to detect installed applications, then Check updates.";
+                if (ActiveList.Count > 0 && ShowUpdatesOnly && UpdateCount == 0)
+                {
+                    EmptyStateTitle = "No updates available";
+                    EmptyStateDetail =
+                        $"{ActiveList.Count} programs are loaded, but none have updates.\n" +
+                        "Turn off “Show updates only” above to see the full list.";
+                }
+                else
+                {
+                    EmptyStateTitle = "No programs loaded";
+                    EmptyStateDetail = "Click Scan, then Check updates.";
+                }
+
                 ShowHistoryButton = false;
                 break;
         }

@@ -31,6 +31,12 @@ public sealed class ProgramInfo
     public string AvailableVersion { get; set; } = string.Empty;
     public string? Notes { get; set; }
 
+    /// <summary>
+    /// Human-facing origin for sorting/display: Steam, Epic Games, winget, Windows, …
+    /// Prefer this over raw PackageSource for the Source column.
+    /// </summary>
+    public string Origin { get; set; } = string.Empty;
+
     /// <summary>When this item was last successfully updated (or last known install/check time).</summary>
     public DateTime? LastUpdated { get; set; }
 
@@ -45,16 +51,28 @@ public sealed class ProgramInfo
     public string? DownloadUrl { get; set; }
     public string? KbId { get; set; }
 
-    public string SourceDisplay => Source switch
+    /// <summary>Shown in the Source column — store/origin first, then package manager.</summary>
+    public string SourceDisplay
     {
-        PackageSource.Winget => "winget",
-        PackageSource.Chocolatey => "chocolatey",
-        PackageSource.Registry => "registry",
-        PackageSource.GitHub => "github",
-        PackageSource.WindowsUpdate => "windows update",
-        PackageSource.Driver => "driver",
-        _ => "unknown"
-    };
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(Origin) &&
+                !Origin.Equals("registry", StringComparison.OrdinalIgnoreCase) &&
+                !Origin.Equals("unknown", StringComparison.OrdinalIgnoreCase))
+                return Origin;
+
+            return Source switch
+            {
+                PackageSource.Winget => "winget",
+                PackageSource.Chocolatey => "chocolatey",
+                PackageSource.Registry => "Windows",
+                PackageSource.GitHub => "GitHub",
+                PackageSource.WindowsUpdate => "Windows Update",
+                PackageSource.Driver => "Driver",
+                _ => "Windows"
+            };
+        }
+    }
 
     public string DisplayKey =>
         !string.IsNullOrWhiteSpace(PackageId)
@@ -79,6 +97,7 @@ public sealed class ProgramInfo
         UpdateAvailable = UpdateAvailable,
         AvailableVersion = AvailableVersion,
         Notes = Notes,
+        Origin = Origin,
         LastUpdated = LastUpdated,
         ProgressPercent = ProgressPercent,
         ProgressStatus = ProgressStatus,

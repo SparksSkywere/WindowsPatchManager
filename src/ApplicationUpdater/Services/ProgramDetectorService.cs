@@ -71,9 +71,19 @@ public sealed class ProgramDetectorService
             _log.Error($"Registry scan failed: {ex.Message}");
         }
 
-        progress?.Report(new ScanProgress { Message = "Merging results...", Percent = 90 });
+        progress?.Report(new ScanProgress { Message = "Detecting stores & versions…", Percent = 85 });
         var merged = Deduplicate(combined);
         ApplyKnownVersionFixes(merged);
+        try
+        {
+            AppOriginEnricher.EnrichAll(merged);
+            _log.Info("Enriched origins/versions (Steam, Epic, publishers, EXE versions).");
+        }
+        catch (Exception ex)
+        {
+            _log.Warn($"Origin enrichment skipped: {ex.Message}");
+        }
+
         _log.Info($"Scan complete: {merged.Count} unique programs.");
         progress?.Report(new ScanProgress { Message = $"Found {merged.Count} programs", Percent = 100 });
         return merged;
@@ -149,7 +159,7 @@ public sealed class ProgramDetectorService
         {
             foreach (var upgrade in upgradeMapById.Values)
             {
-                if (_config.IsExcluded(upgrade) || IsAlreadyFixedUnknown(upgrade, upgrade))
+                if (_config.IsExcluded(upgrade) || !ShouldOfferUpdate(upgrade, upgrade))
                     continue;
                 list.Add(upgrade.Clone());
             }
@@ -163,10 +173,15 @@ public sealed class ProgramDetectorService
 
                 ProgramInfo? upgrade = null;
 
+                // Exact package ID only — loose Contains matching caused false positives.
                 if (!string.IsNullOrWhiteSpace(program.PackageId) &&
                     upgradeMapById.TryGetValue(program.PackageId, out var byId))
                 {
                     upgrade = byId;
+                }
+                else if (TryMatchExactWingetId(program.PackageId, upgradeMapById, out var byExactId))
+                {
+                    upgrade = byExactId;
                 }
                 else if (upgradeMapByName.TryGetValue(NormalizeName(program.Name), out var byName))
                 {
@@ -176,10 +191,21 @@ public sealed class ProgramDetectorService
                 if (upgrade is null)
                     continue;
 
-                // If ARP/winget still reports Unknown but we already force-installed this available version, treat as fixed.
-                if (IsAlreadyFixedUnknown(program, upgrade))
+                // Already at (or past) this available version, or not actually newer.
+                if (!ShouldOfferUpdate(program, upgrade))
                 {
-                    ApplyFixedVersionDisplay(program, upgrade);
+                    // Still show a known version when we previously fixed Unknown.
+                    if (VersionText.IsUnknown(program.Version) &&
+                        TryResolveFixedVersion(program, out var fixedVer))
+                        program.Version = fixedVer;
+                    else if (VersionText.IsUnknown(program.Version) &&
+                             !VersionText.IsUnknown(upgrade.Version))
+                        program.Version = upgrade.Version.Trim();
+
+                    program.UpdateAvailable = false;
+                    program.AvailableVersion = string.Empty;
+                    if (string.IsNullOrWhiteSpace(program.PackageId))
+                        program.PackageId = upgrade.PackageId;
                     continue;
                 }
 
@@ -193,7 +219,9 @@ public sealed class ProgramDetectorService
                     program.Version = upgrade.Version;
                 }
 
-                if (string.IsNullOrWhiteSpace(program.PackageId))
+                if (string.IsNullOrWhiteSpace(program.PackageId) ||
+                    program.PackageId.StartsWith('{') ||
+                    (program.PackageId.Contains('\\') && upgrade.PackageId.Contains('.')))
                     program.PackageId = upgrade.PackageId;
                 // Prefer package-manager source for install
                 if (program.Source is PackageSource.Registry or PackageSource.Unknown)
@@ -212,21 +240,55 @@ public sealed class ProgramDetectorService
             {
                 if (existingIds.Contains(upgrade.PackageId))
                     continue;
-                if (existingNames.Contains(NormalizeName(upgrade.Name)))
+
+                // Name already on the list: mark only if strictly newer
+                var nameKey = NormalizeName(upgrade.Name);
+                if (existingNames.Contains(nameKey))
+                {
+                    var row = list.FirstOrDefault(p => NormalizeName(p.Name) == nameKey);
+                    if (row is not null && !row.UpdateAvailable && !_config.IsExcluded(row) &&
+                        ShouldOfferUpdate(row, upgrade))
+                    {
+                        row.UpdateAvailable = true;
+                        row.AvailableVersion = upgrade.AvailableVersion;
+                        if (string.IsNullOrWhiteSpace(row.PackageId) ||
+                            row.PackageId.StartsWith('{') ||
+                            row.PackageId.Contains('\\'))
+                            row.PackageId = upgrade.PackageId;
+                        if (row.Source is PackageSource.Registry or PackageSource.Unknown)
+                            row.Source = upgrade.Source;
+                    }
                     continue;
+                }
+
                 if (_config.IsExcluded(upgrade))
                     continue;
-                if (IsAlreadyFixedUnknown(upgrade, upgrade))
+                if (!ShouldOfferUpdate(upgrade, upgrade))
                     continue;
                 list.Add(upgrade.Clone());
             }
         }
 
-        // Filter exclusions from final update flags
+        // Final pass: drop any remaining false positives (equal versions / remembered installs)
         foreach (var program in list)
         {
-            if (program.UpdateAvailable && _config.IsExcluded(program))
+            if (!program.UpdateAvailable)
+                continue;
+
+            if (_config.IsExcluded(program))
             {
+                program.UpdateAvailable = false;
+                program.AvailableVersion = string.Empty;
+                continue;
+            }
+
+            if (VersionText.IsUnknown(program.AvailableVersion) ||
+                VersionComparer.IsNewer(GetEffectiveVersion(program), program.AvailableVersion) != true)
+            {
+                // Equal / not newer — clear the update flag
+                if (VersionText.IsUnknown(program.Version) &&
+                    TryResolveFixedVersion(program, out var fixedVer))
+                    program.Version = fixedVer;
                 program.UpdateAvailable = false;
                 program.AvailableVersion = string.Empty;
             }
@@ -273,11 +335,28 @@ public sealed class ProgramDetectorService
             var nameKey = NormalizeName(program.Name);
             if (byName.TryGetValue(nameKey, out var existing))
             {
-                // Merge package id onto registry entry if we already kept a better source under different keying
+                // Merge useful fields from lower-priority rows onto the kept entry
                 if (string.IsNullOrWhiteSpace(existing.PackageId) && !string.IsNullOrWhiteSpace(program.PackageId))
                     existing.PackageId = program.PackageId;
+                // Prefer Steam App / ARP package ids that carry app numbers for origin enrich
+                else if (!string.IsNullOrWhiteSpace(program.PackageId) &&
+                         program.PackageId.Contains("Steam App", StringComparison.OrdinalIgnoreCase) &&
+                         !existing.PackageId.Contains("Steam App", StringComparison.OrdinalIgnoreCase))
+                    existing.PackageId = program.PackageId;
+
                 if (string.IsNullOrWhiteSpace(existing.Publisher) && !string.IsNullOrWhiteSpace(program.Publisher))
                     existing.Publisher = program.Publisher;
+                if (string.IsNullOrWhiteSpace(existing.InstallLocation) && !string.IsNullOrWhiteSpace(program.InstallLocation))
+                    existing.InstallLocation = program.InstallLocation;
+                if (VersionText.IsUnknown(existing.Version) && !VersionText.IsUnknown(program.Version))
+                    existing.Version = program.Version;
+                if ((string.IsNullOrWhiteSpace(existing.Origin) ||
+                     existing.Origin is "winget" or "registry" or "Windows" or "unknown") &&
+                    !string.IsNullOrWhiteSpace(program.Origin) &&
+                    program.Origin is not ("winget" or "registry" or "Windows" or "unknown"))
+                    existing.Origin = program.Origin;
+                if (string.IsNullOrWhiteSpace(existing.Notes) && !string.IsNullOrWhiteSpace(program.Notes))
+                    existing.Notes = program.Notes;
                 continue;
             }
 
@@ -299,6 +378,69 @@ public sealed class ProgramDetectorService
         return new string(chars);
     }
 
+    /// <summary>
+    /// Match registry/ARP package ids to winget ids only when they are clearly the same
+    /// (exact, or ARP path ending with the winget id). No broad Contains matching.
+    /// </summary>
+    private static bool TryMatchExactWingetId(
+        string? packageId,
+        Dictionary<string, ProgramInfo> upgradeMapById,
+        out ProgramInfo? upgrade)
+    {
+        upgrade = null;
+        if (string.IsNullOrWhiteSpace(packageId))
+            return false;
+
+        if (upgradeMapById.TryGetValue(packageId, out upgrade))
+            return true;
+
+        // ARP\Machine\X64\Vendor.Product → Vendor.Product
+        var leaf = packageId;
+        var slash = packageId.LastIndexOf('\\');
+        if (slash >= 0 && slash < packageId.Length - 1)
+            leaf = packageId[(slash + 1)..].Trim();
+
+        if (!string.IsNullOrWhiteSpace(leaf) &&
+            upgradeMapById.TryGetValue(leaf, out upgrade))
+            return true;
+
+        // Only accept upgrade ids that appear as a full trailing segment (not substring of another product)
+        foreach (var kv in upgradeMapById)
+        {
+            if (kv.Key.Length < 3 || !kv.Key.Contains('.'))
+                continue;
+            if (packageId.Equals(kv.Key, StringComparison.OrdinalIgnoreCase))
+            {
+                upgrade = kv.Value;
+                return true;
+            }
+
+            if (packageId.EndsWith("\\" + kv.Key, StringComparison.OrdinalIgnoreCase))
+            {
+                upgrade = kv.Value;
+                return true;
+            }
+
+            if (packageId.EndsWith(kv.Key, StringComparison.OrdinalIgnoreCase))
+            {
+                if (packageId.Length == kv.Key.Length)
+                {
+                    upgrade = kv.Value;
+                    return true;
+                }
+
+                var sepIndex = packageId.Length - kv.Key.Length - 1;
+                if (sepIndex >= 0 && packageId[sepIndex] is '\\' or '/' or ' ')
+                {
+                    upgrade = kv.Value;
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     private void ApplyKnownVersionFixes(List<ProgramInfo> programs)
     {
         foreach (var program in programs)
@@ -311,45 +453,72 @@ public sealed class ProgramDetectorService
         }
     }
 
-    private bool IsAlreadyFixedUnknown(ProgramInfo program, ProgramInfo upgrade)
+    /// <summary>
+    /// True only when available is strictly newer than the effective installed version.
+    /// Suppresses re-offers after a successful install (remembered version) and equal versions.
+    /// </summary>
+    private bool ShouldOfferUpdate(ProgramInfo program, ProgramInfo upgrade)
     {
-        // Suppress re-offering the same catalog version after we force-fixed an Unknown install.
+        if (upgrade is null)
+            return false;
+
+        var available = upgrade.AvailableVersion;
+        if (VersionText.IsUnknown(available))
+            return false;
+
+        // winget row: installed column already equals available → not an update
+        if (!VersionText.IsUnknown(upgrade.Version) &&
+            string.Equals(upgrade.Version.Trim(), available.Trim(), StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        // Previously installed this (or newer) available version successfully
+        if (IsVersionSatisfied(program, upgrade, available))
+            return false;
+
+        var current = GetEffectiveVersion(program, upgrade);
+
+        // Still unknown installed (include-unknown): offer only when enabled and not already fixed
+        if (VersionText.IsUnknown(current))
+            return _config.Config.UpdateBehavior.IncludeUnknown;
+
+        // Strict: available must be greater than current
+        return VersionComparer.IsNewer(current, available) == true;
+    }
+
+    private bool IsVersionSatisfied(ProgramInfo program, ProgramInfo upgrade, string available)
+    {
         if (!string.IsNullOrWhiteSpace(program.PackageId) &&
-            _unknownVersions.IsSatisfied(program.PackageId, upgrade.AvailableVersion))
+            _unknownVersions.IsSatisfied(program.PackageId, available))
             return true;
 
         if (!string.IsNullOrWhiteSpace(upgrade.PackageId) &&
-            !string.Equals(program.PackageId, upgrade.PackageId, StringComparison.OrdinalIgnoreCase) &&
-            _unknownVersions.IsSatisfied(upgrade.PackageId, upgrade.AvailableVersion))
+            _unknownVersions.IsSatisfied(upgrade.PackageId, available))
             return true;
 
         if (!string.IsNullOrWhiteSpace(program.Name) &&
-            _unknownVersions.IsSatisfied(program.Name, upgrade.AvailableVersion))
+            _unknownVersions.IsSatisfied(program.Name, available))
             return true;
 
         if (!string.IsNullOrWhiteSpace(upgrade.Name) &&
-            _unknownVersions.IsSatisfied(upgrade.Name, upgrade.AvailableVersion))
+            _unknownVersions.IsSatisfied(upgrade.Name, available))
             return true;
 
         return false;
     }
 
-    private void ApplyFixedVersionDisplay(ProgramInfo program, ProgramInfo upgrade)
+    /// <summary>Best known installed version: ARP/scan value, else remembered fix, else winget installed column.</summary>
+    private string GetEffectiveVersion(ProgramInfo program, ProgramInfo? upgrade = null)
     {
-        if (TryResolveFixedVersion(program, out var fixedVersion) ||
-            TryResolveFixedVersion(upgrade, out fixedVersion))
-        {
-            program.Version = fixedVersion;
-        }
-        else if (!VersionText.IsUnknown(upgrade.AvailableVersion))
-        {
-            program.Version = upgrade.AvailableVersion.Trim();
-        }
+        if (!VersionText.IsUnknown(program.Version))
+            return program.Version;
 
-        program.UpdateAvailable = false;
-        program.AvailableVersion = string.Empty;
-        if (string.IsNullOrWhiteSpace(program.PackageId))
-            program.PackageId = upgrade.PackageId;
+        if (TryResolveFixedVersion(program, out var fixedVer))
+            return fixedVer;
+
+        if (upgrade is not null && !VersionText.IsUnknown(upgrade.Version))
+            return upgrade.Version;
+
+        return program.Version;
     }
 
     private bool TryResolveFixedVersion(ProgramInfo program, out string version)

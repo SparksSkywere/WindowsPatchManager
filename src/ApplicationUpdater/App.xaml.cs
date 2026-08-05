@@ -61,7 +61,7 @@ public partial class App : Application
         var installer = new UpdateInstallerService(config, winget, chocolatey, _log, unknownVersions);
         var github = new GitHubUpdateService(config, _log);
         var windowsUpdate = new WindowsUpdateService(config, _log);
-        var patchManager = new PatchManagerService(config, detector, installer, github, windowsUpdate, _log);
+        var patchManager = new PatchManagerService(config, detector, installer, winget, github, windowsUpdate, _log);
         var scheduler = new SchedulerService(_log);
 
         if (CliHost.ShouldRunCli(e.Args))

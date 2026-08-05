@@ -84,7 +84,14 @@ public sealed class WingetService
             if (string.IsNullOrWhiteSpace(name))
                 continue;
 
-            if (string.IsNullOrWhiteSpace(id) || id.Contains(' '))
+            // Accept normal IDs and ARP / Steam App IDs (which contain spaces).
+            // Skip only garbage header fragments with spaces and no path separators.
+            if (string.IsNullOrWhiteSpace(id))
+                continue;
+            if (id.Contains(' ') &&
+                !id.Contains('\\') &&
+                !id.Contains("Steam App", StringComparison.OrdinalIgnoreCase) &&
+                !id.Contains("ARP", StringComparison.OrdinalIgnoreCase))
                 continue;
 
             var program = new ProgramInfo
@@ -95,6 +102,14 @@ public sealed class WingetService
                 Source = PackageSource.Winget,
                 AvailableVersion = string.IsNullOrWhiteSpace(available) ? string.Empty : available.Trim()
             };
+
+            // Steam games via winget ARP bridge — mark origin early so UI isn't blank
+            // before registry merge / AppOriginEnricher.
+            if (id.Contains("Steam App", StringComparison.OrdinalIgnoreCase) ||
+                id.Contains("steamapps", StringComparison.OrdinalIgnoreCase))
+            {
+                program.Origin = "Steam";
+            }
 
             // Do NOT mark UpdateAvailable from "winget list" Available column.
             // That column is often stale (e.g. WindowsAppRuntime) and disagrees with
@@ -111,6 +126,194 @@ public sealed class WingetService
 
         _log.Info($"winget list returned {programs.Count} packages (update flags deferred until Check updates).");
         return programs;
+    }
+
+    /// <summary>Search the winget catalog for packages matching a query.</summary>
+    public async Task<IReadOnlyList<ProgramInfo>> SearchAsync(string query, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(query) || !await IsAvailableAsync(ct).ConfigureAwait(false))
+            return [];
+
+        var result = await ProcessRunner.RunAsync(
+            "winget",
+            [
+                "search",
+                query.Trim(),
+                "--accept-source-agreements",
+                "--disable-interactivity"
+            ],
+            ct,
+            timeoutSeconds: 120).ConfigureAwait(false);
+
+        var text = string.IsNullOrWhiteSpace(result.StdOut) ? result.StdErr : result.StdOut;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            _log.Warn($"winget search failed: {result.StdErr}");
+            return [];
+        }
+
+        var rows = WingetTableParser.Parse(text);
+        var programs = new List<ProgramInfo>();
+        foreach (var row in rows)
+        {
+            row.Columns.TryGetValue("Name", out var name);
+            row.Columns.TryGetValue("Id", out var id);
+            row.Columns.TryGetValue("Version", out var version);
+            row.Columns.TryGetValue("Source", out var source);
+            row.Columns.TryGetValue("Match", out var match);
+
+            if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(id) || id.Contains(' '))
+                continue;
+
+            programs.Add(new ProgramInfo
+            {
+                Name = name.Trim(),
+                PackageId = id.Trim(),
+                Version = string.IsNullOrWhiteSpace(version) ? "—" : version.Trim(),
+                AvailableVersion = string.IsNullOrWhiteSpace(version) ? "—" : version.Trim(),
+                Source = PackageSource.Winget,
+                UpdateAvailable = false,
+                Notes = string.IsNullOrWhiteSpace(match) ? source : match,
+                Publisher = string.IsNullOrWhiteSpace(source) ? "winget" : source.Trim()
+            });
+        }
+
+        _log.Info($"winget search \"{query}\": {programs.Count} result(s).");
+        return programs;
+    }
+
+    /// <summary>Install a package by id (latest unless <paramref name="version"/> is set).</summary>
+    public async Task<UpdateResult> InstallPackageAsync(
+        ProgramInfo program,
+        string? version = null,
+        CancellationToken ct = default)
+    {
+        if (!string.IsNullOrWhiteSpace(version))
+            return await InstallVersionAsync(program, version, ct).ConfigureAwait(false);
+
+        var result = new UpdateResult
+        {
+            Program = program,
+            StartTime = DateTime.Now
+        };
+
+        if (string.IsNullOrWhiteSpace(program.PackageId))
+        {
+            result.Success = false;
+            result.ErrorMessage = "No package ID.";
+            result.EndTime = DateTime.Now;
+            return result;
+        }
+
+        _log.Info($"Installing {program.Name} ({program.PackageId}) via winget...");
+        var args = BuildInstallArgs(program, force: false, interactive: !_config.Config.UpdateBehavior.Silent);
+        var proc = await ProcessRunner.RunAsync(
+            "winget",
+            args,
+            new ProcessRunOptions
+            {
+                TimeoutSeconds = 1800,
+                ShowWindow = !_config.Config.UpdateBehavior.Silent,
+                Elevate = false
+            },
+            ct).ConfigureAwait(false);
+
+        result.Output = proc.CombinedOutput;
+        result.EndTime = DateTime.Now;
+        result.Success = IsSuccessful(proc);
+        if (result.Success)
+        {
+            program.LastUpdated = DateTime.Now;
+            _log.Success($"Installed {program.Name}");
+        }
+        else
+        {
+            // Retry elevated once
+            var elev = await ProcessRunner.RunAsync(
+                "winget",
+                args,
+                new ProcessRunOptions { TimeoutSeconds = 1800, ShowWindow = true, Elevate = true },
+                ct).ConfigureAwait(false);
+            result.Output += "\n\n" + elev.CombinedOutput;
+            result.Success = IsSuccessful(elev);
+            result.EndTime = DateTime.Now;
+            if (result.Success)
+            {
+                program.LastUpdated = DateTime.Now;
+                _log.Success($"Installed {program.Name} (elevated)");
+            }
+            else
+            {
+                result.ErrorMessage = ExtractError(elev) ?? ExtractError(proc) ?? "Install failed.";
+                _log.Error($"Install failed {program.Name}: {result.ErrorMessage}");
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>Uninstall a package by id via winget.</summary>
+    public async Task<UpdateResult> UninstallPackageAsync(ProgramInfo program, CancellationToken ct = default)
+    {
+        var result = new UpdateResult
+        {
+            Program = program,
+            StartTime = DateTime.Now
+        };
+
+        if (string.IsNullOrWhiteSpace(program.PackageId))
+        {
+            result.Success = false;
+            result.ErrorMessage = "No package ID.";
+            result.EndTime = DateTime.Now;
+            return result;
+        }
+
+        _log.Info($"Uninstalling {program.Name} ({program.PackageId}) via winget...");
+        var args = new List<string>
+        {
+            "uninstall",
+            "--id", program.PackageId,
+            "--exact",
+            "--accept-source-agreements",
+            "--disable-interactivity"
+        };
+        if (_config.Config.UpdateBehavior.Silent)
+            args.Add("--silent");
+
+        var proc = await ProcessRunner.RunAsync(
+            "winget",
+            args,
+            new ProcessRunOptions { TimeoutSeconds = 1200, ShowWindow = false, Elevate = false },
+            ct).ConfigureAwait(false);
+
+        result.Output = proc.CombinedOutput;
+        result.EndTime = DateTime.Now;
+        result.Success = proc.Success ||
+                         proc.CombinedOutput.Contains("successfully uninstalled", StringComparison.OrdinalIgnoreCase) ||
+                         proc.CombinedOutput.Contains("No installed package found", StringComparison.OrdinalIgnoreCase);
+
+        if (!result.Success)
+        {
+            var elev = await ProcessRunner.RunAsync(
+                "winget",
+                args,
+                new ProcessRunOptions { TimeoutSeconds = 1200, ShowWindow = true, Elevate = true },
+                ct).ConfigureAwait(false);
+            result.Output += "\n\n" + elev.CombinedOutput;
+            result.EndTime = DateTime.Now;
+            result.Success = elev.Success ||
+                             elev.CombinedOutput.Contains("successfully uninstalled", StringComparison.OrdinalIgnoreCase);
+            if (!result.Success)
+                result.ErrorMessage = ExtractError(elev) ?? ExtractError(proc) ?? "Uninstall failed.";
+        }
+
+        if (result.Success)
+            _log.Success($"Uninstalled {program.Name}");
+        else
+            _log.Error($"Uninstall failed {program.Name}: {result.ErrorMessage}");
+
+        return result;
     }
 
     /// <summary>
@@ -326,22 +529,35 @@ public sealed class WingetService
             if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(id))
                 continue;
 
-            if (id.Contains(' ') && !id.Contains('.'))
+            // Skip garbage / multi-word non-ids; allow Vendor.Product and ARP\… paths
+            if (id.Contains(' ') && !id.Contains('.') && !id.Contains('\\'))
+                continue;
+
+            var installed = string.IsNullOrWhiteSpace(version) ? "Unknown" : version.Trim();
+            var availableVer = string.IsNullOrWhiteSpace(available) ? "Unknown" : available.Trim();
+
+            // Drop rows that are not real upgrades (equal / not newer / empty available)
+            if (VersionText.IsUnknown(availableVer))
+                continue;
+            if (string.Equals(installed, availableVer, StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (!VersionText.IsUnknown(installed) &&
+                VersionComparer.IsNewer(installed, availableVer) != true)
                 continue;
 
             upgrades.Add(new ProgramInfo
             {
                 Name = name.Trim(),
                 PackageId = id.Trim(),
-                Version = string.IsNullOrWhiteSpace(version) ? "Unknown" : version.Trim(),
-                AvailableVersion = string.IsNullOrWhiteSpace(available) ? "Unknown" : available.Trim(),
+                Version = installed,
+                AvailableVersion = availableVer,
                 UpdateAvailable = true,
                 Source = PackageSource.Winget,
                 Notes = string.IsNullOrWhiteSpace(source) ? null : source.Trim()
             });
         }
 
-        _log.Info($"winget upgrade listed {upgrades.Count} package(s).");
+        _log.Info($"winget upgrade listed {upgrades.Count} package(s) after version filter.");
         return upgrades;
     }
 

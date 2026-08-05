@@ -32,6 +32,27 @@ if (-not (Test-Path $IconSrc)) {
     throw "Production icon missing: $IconSrc"
 }
 
+# Keep MSI / Bundle version in lockstep with the app Version (MajorUpgrade depends on it).
+$csprojText = Get-Content $AppProj -Raw
+if ($csprojText -match '<Version>([^<]+)</Version>') {
+    $AppVersion = $Matches[1].Trim()
+    Write-Host "App version: $AppVersion" -ForegroundColor Green
+    foreach ($wxs in @(
+        (Join-Path $Root 'installer\wix\ApplicationUpdater.Installer\Package.wxs'),
+        (Join-Path $Root 'installer\wix\ApplicationUpdater.Bundle\Bundle.wxs')
+    )) {
+        if (-not (Test-Path $wxs)) { continue }
+        $text = Get-Content $wxs -Raw
+        $updated = [regex]::Replace($text, 'Version="\d+\.\d+\.\d+"', "Version=`"$AppVersion`"", 1)
+        if ($updated -ne $text) {
+            Set-Content -Path $wxs -Value $updated -Encoding UTF8 -NoNewline
+            Write-Host "  Synced version in $(Split-Path $wxs -Leaf)" -ForegroundColor Green
+        }
+    }
+} else {
+    Write-Host 'WARNING: Could not read <Version> from app csproj; WiX versions left as-is.' -ForegroundColor Yellow
+}
+
 # Sync icon BEFORE publish so ApplicationIcon is baked into the EXE
 New-Item -ItemType Directory -Path (Split-Path $AppIcon) -Force | Out-Null
 Copy-Item $IconSrc $AppIcon -Force

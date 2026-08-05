@@ -29,7 +29,9 @@ public partial class ProgramItemViewModel : ObservableObject
         Model.UpdateAvailable || !string.IsNullOrWhiteSpace(Model.AvailableVersion)
             ? (string.IsNullOrWhiteSpace(Model.AvailableVersion) ? "—" : Model.AvailableVersion)
             : "—";
+    /// <summary>Origin/store for sorting (Steam, Epic, winget, …).</summary>
     public string Source => Model.SourceDisplay;
+    public string Origin => string.IsNullOrWhiteSpace(Model.Origin) ? Model.SourceDisplay : Model.Origin;
     public string Publisher => string.IsNullOrWhiteSpace(Model.Publisher) ? "—" : Model.Publisher;
     public string PackageId => string.IsNullOrWhiteSpace(Model.PackageId) ? "—" : Model.PackageId;
     public bool UpdateAvailable => Model.UpdateAvailable;
@@ -70,6 +72,7 @@ public partial class ProgramItemViewModel : ObservableObject
         OnPropertyChanged(nameof(Version));
         OnPropertyChanged(nameof(AvailableVersion));
         OnPropertyChanged(nameof(Source));
+        OnPropertyChanged(nameof(Origin));
         OnPropertyChanged(nameof(Publisher));
         OnPropertyChanged(nameof(PackageId));
         OnPropertyChanged(nameof(UpdateAvailable));

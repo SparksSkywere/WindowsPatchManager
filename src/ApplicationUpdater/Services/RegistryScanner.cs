@@ -1,3 +1,4 @@
+using System.IO;
 using ApplicationUpdater.Models;
 using Microsoft.Win32;
 
@@ -68,13 +69,71 @@ public static class RegistryScanner
                     if (!seen.Add(name))
                         continue;
 
+                    var version = (key.GetValue("DisplayVersion") as string)?.Trim();
+                    if (string.IsNullOrWhiteSpace(version))
+                        version = (key.GetValue("Version") as string)?.Trim();
+                    if (string.IsNullOrWhiteSpace(version) && key.GetValue("VersionMajor") is int major)
+                    {
+                        var minor = key.GetValue("VersionMinor") is int mi ? mi : 0;
+                        version = $"{major}.{minor}";
+                    }
+
+                    var publisher = (key.GetValue("Publisher") as string)?.Trim() ?? string.Empty;
+                    var installLocation = (key.GetValue("InstallLocation") as string)?.Trim() ?? string.Empty;
+                    if (string.IsNullOrWhiteSpace(installLocation))
+                        installLocation = (key.GetValue("InstallSource") as string)?.Trim() ?? string.Empty;
+                    // DisplayIcon often points at the main EXE — keep folder as location fallback
+                    if (string.IsNullOrWhiteSpace(installLocation) &&
+                        key.GetValue("DisplayIcon") is string icon &&
+                        !string.IsNullOrWhiteSpace(icon))
+                    {
+                        var iconPath = icon.Split(',')[0].Trim().Trim('"');
+                        if (File.Exists(iconPath))
+                            installLocation = Path.GetDirectoryName(iconPath) ?? string.Empty;
+                    }
+
+                    var uninstallString = (key.GetValue("UninstallString") as string)?.Trim() ?? string.Empty;
+
+                    // Steam / store games often omit InstallLocation; recover from uninstall or key name
+                    if (string.IsNullOrWhiteSpace(installLocation) &&
+                        !string.IsNullOrWhiteSpace(uninstallString))
+                    {
+                        var m = System.Text.RegularExpressions.Regex.Match(
+                            uninstallString, "\"([^\"]+\\.(?:exe|bat|cmd))\"");
+                        if (m.Success)
+                        {
+                            var file = m.Groups[1].Value;
+                            // steam.exe is the uninstaller host, not the game folder — skip as location
+                            if (File.Exists(file) &&
+                                !file.Contains(@"\steam\steam.exe", StringComparison.OrdinalIgnoreCase) &&
+                                !file.EndsWith(@"\steam.exe", StringComparison.OrdinalIgnoreCase))
+                                installLocation = Path.GetDirectoryName(file) ?? string.Empty;
+                        }
+                    }
+
+                    var origin = string.Empty;
+                    var blob = $"{installLocation}\n{uninstallString}\n{subName}";
+                    if (blob.Contains("steamapps", StringComparison.OrdinalIgnoreCase) ||
+                        blob.Contains("Steam App", StringComparison.OrdinalIgnoreCase) ||
+                        blob.Contains("steam://", StringComparison.OrdinalIgnoreCase))
+                        origin = "Steam";
+                    else if (blob.Contains(@"\Epic Games\", StringComparison.OrdinalIgnoreCase) ||
+                             blob.Contains("EpicGames", StringComparison.OrdinalIgnoreCase))
+                        origin = "Epic Games";
+                    else if (blob.Contains(@"\GOG Galaxy\", StringComparison.OrdinalIgnoreCase) ||
+                             blob.Contains(@"\GOG Games\", StringComparison.OrdinalIgnoreCase))
+                        origin = "GOG";
+
                     results.Add(new ProgramInfo
                     {
                         Name = name.Trim(),
-                        Version = (key.GetValue("DisplayVersion") as string)?.Trim() ?? "Unknown",
-                        Publisher = (key.GetValue("Publisher") as string)?.Trim() ?? string.Empty,
-                        InstallLocation = (key.GetValue("InstallLocation") as string)?.Trim() ?? string.Empty,
-                        Source = PackageSource.Registry
+                        Version = string.IsNullOrWhiteSpace(version) ? "Unknown" : version,
+                        Publisher = publisher,
+                        InstallLocation = installLocation,
+                        PackageId = subName, // uninstall key id — useful for matching
+                        Source = PackageSource.Registry,
+                        Origin = origin,
+                        Notes = string.IsNullOrWhiteSpace(uninstallString) ? null : uninstallString
                     });
                 }
                 catch

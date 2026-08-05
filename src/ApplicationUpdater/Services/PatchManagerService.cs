@@ -12,6 +12,7 @@ public sealed class PatchManagerService
     private readonly ConfigService _config;
     private readonly ProgramDetectorService _detector;
     private readonly UpdateInstallerService _installer;
+    private readonly WingetService _winget;
     private readonly GitHubUpdateService _github;
     private readonly WindowsUpdateService _windowsUpdate;
     private readonly LogService _log;
@@ -24,6 +25,7 @@ public sealed class PatchManagerService
         ConfigService config,
         ProgramDetectorService detector,
         UpdateInstallerService installer,
+        WingetService winget,
         GitHubUpdateService github,
         WindowsUpdateService windowsUpdate,
         LogService log)
@@ -31,6 +33,7 @@ public sealed class PatchManagerService
         _config = config;
         _detector = detector;
         _installer = installer;
+        _winget = winget;
         _github = github;
         _windowsUpdate = windowsUpdate;
         _log = log;
@@ -126,6 +129,27 @@ public sealed class PatchManagerService
         IProgress<ScanProgress>? progress = null,
         CancellationToken ct = default)
         => _windowsUpdate.GetInstallHistoryAsync(driversOnly, progress, ct);
+
+    public async Task<IReadOnlyList<ProgramInfo>> SearchWingetAsync(string query, CancellationToken ct = default)
+    {
+        var list = (await _winget.SearchAsync(query, ct).ConfigureAwait(false)).ToList();
+        foreach (var p in list)
+            p.Origin = string.IsNullOrWhiteSpace(p.Origin) ? "winget" : p.Origin;
+        return list;
+    }
+
+    public async Task<IReadOnlyList<ProgramInfo>> ListWingetInstalledAsync(CancellationToken ct = default)
+    {
+        var list = (await _winget.ListInstalledAsync(ct).ConfigureAwait(false)).ToList();
+        try { Helpers.AppOriginEnricher.EnrichAll(list); } catch { /* non-fatal */ }
+        return list;
+    }
+
+    public Task<UpdateResult> InstallPackageAsync(ProgramInfo program, CancellationToken ct = default)
+        => _winget.InstallPackageAsync(program, null, ct);
+
+    public Task<UpdateResult> UninstallPackageAsync(ProgramInfo program, CancellationToken ct = default)
+        => _winget.UninstallPackageAsync(program, ct);
 
     public async Task<IReadOnlyDictionary<string, UpdateResult>> UpdateAsync(
         IReadOnlyList<ProgramInfo> programs,

@@ -182,8 +182,11 @@ public static class ThemeManager
         set("MenuItemHighlightTextBrush", t.HighlightText);
         set("MenuSeparatorBrush", t.Shadow);
 
-        // Controls
-        set("ControlBackgroundBrush", t.Window);
+        // Controls — use Face (chrome) not Window (often pure white even in mixed themes)
+        // so text boxes / options fields track dark surfaces correctly.
+        set("ControlBackgroundBrush", t.Id.Contains("dark", StringComparison.OrdinalIgnoreCase)
+            ? t.Window
+            : Blend(t.Window, t.Face, 0.15));
         set("ControlHoverBrush", t.Hover);
         set("ControlPressedBrush", Blend(t.Hover, t.Shadow, 0.35));
         set("HeaderBackgroundBrush", t.Face);

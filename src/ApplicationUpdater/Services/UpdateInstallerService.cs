@@ -78,28 +78,22 @@ public sealed class UpdateInstallerService
 
                 if (result.Success)
                 {
-                    // Always replace Unknown (or keep available) after a successful update.
-                    if (wasUnknown || VersionText.IsUnknown(program.Version))
-                    {
-                        if (!string.IsNullOrWhiteSpace(targetVersion) && !VersionText.IsUnknown(targetVersion))
-                            program.Version = targetVersion.Trim();
-                    }
-                    else if (!string.IsNullOrWhiteSpace(targetVersion) && !VersionText.IsUnknown(targetVersion))
-                    {
+                    // Always adopt the installed/available version after a successful update.
+                    if (!string.IsNullOrWhiteSpace(targetVersion) && !VersionText.IsUnknown(targetVersion))
                         program.Version = targetVersion.Trim();
-                    }
 
                     program.UpdateAvailable = false;
+                    program.AvailableVersion = string.Empty;
 
-                    if (wasUnknown && !VersionText.IsUnknown(program.Version))
+                    // Remember for ALL successful updates so the next Check updates does not
+                    // re-offer the same version while ARP/winget still reports Unknown or stale data.
+                    if (!VersionText.IsUnknown(program.Version))
                     {
-                        RememberUnknownFix(program);
-                        _log.Info($"Replaced unknown version for {program.Name} with {program.Version}.");
-                    }
-                    else if (!VersionText.IsUnknown(program.Version))
-                    {
-                        // Still record so a later ARP "Unknown" does not re-offer the same version.
-                        RememberUnknownFix(program);
+                        RememberInstalledVersion(program);
+                        if (wasUnknown)
+                            _log.Info($"Replaced unknown version for {program.Name} with {program.Version}.");
+                        else
+                            _log.Info($"Recorded installed version for {program.Name}: {program.Version}.");
                     }
                 }
 
@@ -148,7 +142,7 @@ public sealed class UpdateInstallerService
         };
     }
 
-    private void RememberUnknownFix(ProgramInfo program)
+    private void RememberInstalledVersion(ProgramInfo program)
     {
         if (VersionText.IsUnknown(program.Version))
             return;
