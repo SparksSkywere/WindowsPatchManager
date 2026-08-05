@@ -418,9 +418,10 @@ public partial class MainViewModel : ObservableObject
                         SetDeterminateProgress(pct, p.Message ?? $"Updating {p.ProgramName} ({p.Completed}/{p.Total})");
                     }
 
+                    // % is shown under the swirl; keep overlay text to the current step only
                     BusyOverlayText = string.IsNullOrWhiteSpace(p.Message)
-                        ? $"Updating {p.ProgramName}\n{p.Completed} of {p.Total} · {ProgressPercentText}"
-                        : $"{p.ProgramName}\n{p.Message}\n{ProgressPercentText}";
+                        ? $"Updating {p.ProgramName}\n{p.Completed} of {p.Total}"
+                        : $"{p.ProgramName}\n{p.Message}";
 
                     // Per-row progress cell
                     if (!string.IsNullOrWhiteSpace(p.ProgramKey))
@@ -505,7 +506,7 @@ public partial class MainViewModel : ObservableObject
                 if (p.Percent >= 0)
                 {
                     SetDeterminateProgress(p.Percent, p.Message);
-                    BusyOverlayText = $"{p.Message}\n{ProgressPercentText}";
+                    BusyOverlayText = p.Message;
                 }
                 else
                 {

@@ -5,12 +5,19 @@ All notable changes to **Windows Patch Manager** are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [2.1.10] — 2026-08-05
+
+### Fixed
+- Busy overlay shows the spinning swirl again, with **progress % underneath in smaller text** (instead of replacing the spinner).
+
+---
+
 ## [2.1.9] — 2026-08-05
 
 ### Added
 
-#### Themes (Chronolog era pack)
-- Full theme catalog ported from Chronolog, with **System** as the default (follows Windows light/dark app mode → Windows 11 / Windows 11 Dark).
+#### Themes
+- Full theme catalog, with **System** as the default (follows Windows light/dark app mode → Windows 11 / Windows 11 Dark).
 - Selectable era themes in **Options → Appearance**:
   - Windows 95, 98, 2000, XP, Vista, 7, 8, 10, 11, 11 Dark
 - Live theme preview in Options; Cancel restores the saved theme.
@@ -81,5 +88,6 @@ Previous Python-based Patch Manager (GUI + winget/Chocolatey helpers). Supersede
 
 ---
 
+[2.1.10]: https://github.com/SparksSkywere/WindowsPatchManager/releases/tag/v2.1.10
 [2.1.9]: https://github.com/SparksSkywere/WindowsPatchManager/releases/tag/v2.1.9
 [2.1.0]: https://github.com/SparksSkywere/WindowsPatchManager/releases/tag/v2.1.0
