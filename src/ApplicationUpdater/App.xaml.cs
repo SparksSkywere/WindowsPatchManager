@@ -57,11 +57,14 @@ public partial class App : Application
         var unknownVersions = new UnknownVersionStore(config.AppDataDirectory);
         var winget = new WingetService(config, _log);
         var chocolatey = new ChocolateyService(_log);
-        var detector = new ProgramDetectorService(config, winget, chocolatey, _log, unknownVersions);
-        var installer = new UpdateInstallerService(config, winget, chocolatey, _log, unknownVersions);
+        var wsl = new WslUpdateService(config, _log);
+        var office = new OfficeUpdateService(config, _log);
+        var detector = new ProgramDetectorService(config, winget, chocolatey, wsl, office, _log, unknownVersions);
+        var installer = new UpdateInstallerService(config, winget, chocolatey, wsl, office, _log, unknownVersions);
         var github = new GitHubUpdateService(config, _log);
-        var windowsUpdate = new WindowsUpdateService(config, _log);
-        var patchManager = new PatchManagerService(config, detector, installer, winget, github, windowsUpdate, _log);
+        var msrc = new MsrcCveService(config, _log);
+        var windowsUpdate = new WindowsUpdateService(config, _log, msrc);
+        var patchManager = new PatchManagerService(config, detector, installer, winget, github, windowsUpdate, wsl, office, _log);
         var scheduler = new SchedulerService(_log);
 
         if (CliHost.ShouldRunCli(e.Args))

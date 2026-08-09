@@ -217,7 +217,7 @@
                             BorderThickness="0">
                     <TabItem Header="Programs"/>
                     <TabItem Header="Drivers"/>
-                    <TabItem Header="Windows Update"/>
+                    <TabItem Header="Windows Update / CVE"/>
                     <TabItem Header="Install"/>
                     <TabItem Header="Uninstall"/>
                 </TabControl>
@@ -260,11 +260,22 @@
                             </ListView.ContextMenu>
                             <ListView.View>
                                 <GridView ColumnHeaderContainerStyle="{StaticResource ThemedGridViewColumnHeader}">
-                                    <GridViewColumn Width="36">
+                                    <GridViewColumn Width="40">
+                                        <GridViewColumn.Header>
+                                            <!-- Select / deselect all rows; shows indeterminate when partially selected -->
+                                            <CheckBox IsThreeState="True"
+                                                      IsChecked="{Binding DataContext.SelectAllChecked, RelativeSource={RelativeSource AncestorType=ListView}, Mode=OneWay}"
+                                                      Command="{Binding DataContext.ToggleSelectAllCommand, RelativeSource={RelativeSource AncestorType=ListView}}"
+                                                      ToolTip="Select all / deselect all"
+                                                      HorizontalAlignment="Center"
+                                                      VerticalAlignment="Center"
+                                                      Focusable="False"/>
+                                        </GridViewColumn.Header>
                                         <GridViewColumn.CellTemplate>
                                             <DataTemplate>
                                                 <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                          HorizontalAlignment="Center"/>
+                                                          HorizontalAlignment="Center"
+                                                          ToolTip="Select this item"/>
                                             </DataTemplate>
                                         </GridViewColumn.CellTemplate>
                                     </GridViewColumn>
@@ -293,7 +304,37 @@
                                             </DataTemplate>
                                         </GridViewColumn.CellTemplate>
                                     </GridViewColumn>
-                                    <GridViewColumn Header="Status" Width="110">
+                                    <GridViewColumn Header="Severity" Width="90">
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Severity}"
+                                                           Foreground="{DynamicResource PrimaryTextBrush}"
+                                                           FontWeight="{Binding IsSecurityUpdate, Converter={StaticResource BoolToBold}}"
+                                                           ToolTip="{Binding Severity}"/>
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+                                    <GridViewColumn Header="CVE" Width="150">
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding CveIds}"
+                                                           Foreground="{DynamicResource PrimaryTextBrush}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           ToolTip="{Binding CveIds}"/>
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+                                    <GridViewColumn Header="KB" Width="100">
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding KbId}"
+                                                           Foreground="{DynamicResource PrimaryTextBrush}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           ToolTip="{Binding KbId}"/>
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+                                    <GridViewColumn Header="Status" Width="120">
                                         <GridViewColumn.CellTemplate>
                                             <DataTemplate>
                                                 <TextBlock Text="{Binding UpdateStatus}"

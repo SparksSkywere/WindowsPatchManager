@@ -9,6 +9,30 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.3.0] — 2026-08-09
+
+### Added
+- **Microsoft Store** updates via winget `msstore` source (explicit upgrade pass, Store labeling, `--source msstore` on install/upgrade).
+- **Windows Subsystem for Linux (WSL)** platform updates (`wsl --update` / Microsoft.WSL) and optional **distro package** upgrades (apt, dnf, yum, zypper, pacman, apk).
+- **Microsoft Office / Microsoft 365** Click-to-Run updates via `OfficeC2RClient`.
+- **CVE / security KB scanner** on the **Windows Update / CVE** tab:
+  - Extracts **CVE IDs**, **KB articles**, and **MSRC severity** from pending Windows Update packages.
+  - Prioritizes **Critical** and **Important** security updates in the list.
+  - Inventories **installed KBs** (WMI QuickFixEngineering + WU history).
+  - Optional **Microsoft MSRC** online cross-check for recent monthly releases — surfaces **missing Critical/Important KBs** tied to CVEs for the local Windows edition.
+- List columns: **Severity**, **CVE**, **KB**.
+- Options toggles for Microsoft Store, WSL, WSL distro packages, Microsoft Office, CVE scan, prioritize security, security-only filter, MSRC online query, months to scan, and Critical/Important-only.
+- **Select all** checkbox in the list column header (left of Name): tick/untick all rows; three-state when partially selected.
+
+### Changed
+- Source column recognizes **Microsoft Store**, **WSL**, **Microsoft Office**, and security-severity labels for Windows Update.
+- Default config includes the new update sources (enabled).
+- Windows Update search prefers Security / Critical category queries before the full software catalog.
+- Install path can match updates by **KB number** (including MSRC gap rows when WU offers them).
+- Tab title: **Windows Update / CVE**.
+
+---
+
 ## [2.1.14] — 2026-08-05
 
 ### Added
@@ -128,6 +152,7 @@ Previous Python-based Patch Manager (GUI + winget/Chocolatey helpers). Supersede
 
 ---
 
+[2.3.0]: https://github.com/SparksSkywere/WindowsPatchManager/releases/tag/v2.3.0
 [2.1.14]: https://github.com/SparksSkywere/WindowsPatchManager/releases/tag/v2.1.14
 [2.1.10]: https://github.com/SparksSkywere/WindowsPatchManager/releases/tag/v2.1.10
 [2.1.9]: https://github.com/SparksSkywere/WindowsPatchManager/releases/tag/v2.1.9

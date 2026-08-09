@@ -35,8 +35,17 @@ public partial class ProgramItemViewModel : ObservableObject
     public string Publisher => string.IsNullOrWhiteSpace(Model.Publisher) ? "—" : Model.Publisher;
     public string PackageId => string.IsNullOrWhiteSpace(Model.PackageId) ? "—" : Model.PackageId;
     public bool UpdateAvailable => Model.UpdateAvailable;
-    public string UpdateStatus => Model.UpdateAvailable ? "Update available" : "Up to date";
+    public string UpdateStatus => Model.UpdateAvailable
+        ? (Model.IsSecurityUpdate
+            ? (string.IsNullOrWhiteSpace(Model.Severity) ? "Security update" : $"Security · {Model.Severity}")
+            : "Update available")
+        : "Up to date";
     public string LastUpdated => Model.LastUpdatedDisplay;
+    public string Severity => Model.SeverityDisplay;
+    public string CveIds => Model.CveDisplay;
+    public string KbId => Model.KbDisplay;
+    public bool IsSecurityUpdate => Model.IsSecurityUpdate;
+    public int SeverityRank => Model.SeverityRank;
     public string ProgressText =>
         ProgressPercent < 0
             ? "—"
@@ -79,5 +88,10 @@ public partial class ProgramItemViewModel : ObservableObject
         OnPropertyChanged(nameof(UpdateStatus));
         OnPropertyChanged(nameof(LastUpdated));
         OnPropertyChanged(nameof(ProgressText));
+        OnPropertyChanged(nameof(Severity));
+        OnPropertyChanged(nameof(CveIds));
+        OnPropertyChanged(nameof(KbId));
+        OnPropertyChanged(nameof(IsSecurityUpdate));
+        OnPropertyChanged(nameof(SeverityRank));
     }
 }

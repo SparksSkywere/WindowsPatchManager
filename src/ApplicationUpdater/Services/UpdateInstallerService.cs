@@ -10,6 +10,8 @@ public sealed class UpdateInstallerService
     private readonly ConfigService _config;
     private readonly WingetService _winget;
     private readonly ChocolateyService _chocolatey;
+    private readonly WslUpdateService _wsl;
+    private readonly OfficeUpdateService _office;
     private readonly LogService _log;
     private readonly UnknownVersionStore _unknownVersions;
 
@@ -17,12 +19,16 @@ public sealed class UpdateInstallerService
         ConfigService config,
         WingetService winget,
         ChocolateyService chocolatey,
+        WslUpdateService wsl,
+        OfficeUpdateService office,
         LogService log,
         UnknownVersionStore unknownVersions)
     {
         _config = config;
         _winget = winget;
         _chocolatey = chocolatey;
+        _wsl = wsl;
+        _office = office;
         _log = log;
         _unknownVersions = unknownVersions;
     }
@@ -35,6 +41,8 @@ public sealed class UpdateInstallerService
         var toUpdate = programs
             .Where(p => p.UpdateAvailable && !string.IsNullOrWhiteSpace(p.PackageId))
             .Where(p => !_config.IsExcluded(p))
+            // Skip sources that are handled by PatchManagerService (WU/GitHub) when mixed batches appear
+            .Where(p => p.Source is not (PackageSource.WindowsUpdate or PackageSource.Driver or PackageSource.GitHub))
             .ToList();
 
         // Prefer winget over Chocolatey when the same product appears from both sources
@@ -138,6 +146,9 @@ public sealed class UpdateInstallerService
         return program.Source switch
         {
             PackageSource.Chocolatey => _chocolatey.UpgradeAsync(program, ct),
+            PackageSource.Wsl => _wsl.UpgradeAsync(program, null, 0, 1, ct),
+            PackageSource.Office => _office.UpgradeAsync(program, null, 0, 1, ct),
+            PackageSource.MicrosoftStore => _winget.UpgradeAsync(program, ct),
             _ => _winget.UpgradeAsync(program, ct) // winget default, including registry matched to winget id
         };
     }
@@ -160,7 +171,10 @@ public sealed class UpdateInstallerService
     {
         static int Priority(PackageSource s) => s switch
         {
+            PackageSource.MicrosoftStore => 0,
             PackageSource.Winget => 0,
+            PackageSource.Wsl => 0,
+            PackageSource.Office => 0,
             PackageSource.Chocolatey => 1,
             PackageSource.Registry => 2,
             _ => 3

@@ -11,7 +11,8 @@ public static class AppInfo
     public const string Copyright = "Copyright © Skywere Industries";
     public const string Description =
         "Manage software updates on Windows. Detects installed programs and installs " +
-        "available updates using Windows Package Manager (winget) and Chocolatey.";
+        "available updates using winget, Microsoft Store, Chocolatey, WSL, Microsoft Office, " +
+        "GitHub Releases, Windows Update, and CVE/KB security scanning (MSRC).";
 
     public const string ExeFileName = "WindowsPatchManager.exe";
     public const string InstallFolderName = "WindowsPatchManager";

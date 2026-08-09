@@ -8,6 +8,8 @@ public sealed class ProgramDetectorService
     private readonly ConfigService _config;
     private readonly WingetService _winget;
     private readonly ChocolateyService _chocolatey;
+    private readonly WslUpdateService _wsl;
+    private readonly OfficeUpdateService _office;
     private readonly LogService _log;
     private readonly UnknownVersionStore _unknownVersions;
 
@@ -15,12 +17,16 @@ public sealed class ProgramDetectorService
         ConfigService config,
         WingetService winget,
         ChocolateyService chocolatey,
+        WslUpdateService wsl,
+        OfficeUpdateService office,
         LogService log,
         UnknownVersionStore unknownVersions)
     {
         _config = config;
         _winget = winget;
         _chocolatey = chocolatey;
+        _wsl = wsl;
+        _office = office;
         _log = log;
         _unknownVersions = unknownVersions;
     }
@@ -59,7 +65,7 @@ public sealed class ProgramDetectorService
             }
         }
 
-        progress?.Report(new ScanProgress { Message = "Scanning Windows registry...", Percent = 70 });
+        progress?.Report(new ScanProgress { Message = "Scanning Windows registry...", Percent = 55 });
         try
         {
             var registryPrograms = RegistryScanner.Scan();
@@ -71,7 +77,29 @@ public sealed class ProgramDetectorService
             _log.Error($"Registry scan failed: {ex.Message}");
         }
 
-        progress?.Report(new ScanProgress { Message = "Detecting stores & versions…", Percent = 85 });
+        progress?.Report(new ScanProgress { Message = "Scanning Windows Subsystem for Linux…", Percent = 70 });
+        try
+        {
+            var wslItems = await _wsl.ScanAsync(progress, ct).ConfigureAwait(false);
+            combined.AddRange(wslItems);
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"WSL scan failed: {ex.Message}");
+        }
+
+        progress?.Report(new ScanProgress { Message = "Scanning Microsoft Office…", Percent = 80 });
+        try
+        {
+            var officeItems = await _office.ScanAsync(progress, ct).ConfigureAwait(false);
+            combined.AddRange(officeItems);
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"Office scan failed: {ex.Message}");
+        }
+
+        progress?.Report(new ScanProgress { Message = "Detecting stores & versions…", Percent = 90 });
         var merged = Deduplicate(combined);
         ApplyKnownVersionFixes(merged);
         try
@@ -131,7 +159,7 @@ public sealed class ProgramDetectorService
             }
         }
 
-        progress?.Report(new ScanProgress { Message = "Querying Chocolatey for outdated packages...", Percent = 55 });
+        progress?.Report(new ScanProgress { Message = "Querying Chocolatey for outdated packages...", Percent = 45 });
         if (_config.Config.UpdateSources.Chocolatey.Enabled)
         {
             try
@@ -152,6 +180,32 @@ public sealed class ProgramDetectorService
             }
         }
 
+        // WSL platform + distro packages (flags set on rows; do not put in upgradeMap —
+        // available labels like "Latest" / "N package(s)" are not semver and must not
+        // go through ShouldOfferUpdate matching).
+        progress?.Report(new ScanProgress { Message = "Checking WSL updates...", Percent = 60 });
+        try
+        {
+            var wslUpdates = await _wsl.CheckUpdatesAsync(list, progress, ct).ConfigureAwait(false);
+            MergeSpecialSourceRows(list, wslUpdates);
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"WSL update check failed: {ex.Message}");
+        }
+
+        // Microsoft Office Click-to-Run
+        progress?.Report(new ScanProgress { Message = "Checking Microsoft Office updates...", Percent = 70 });
+        try
+        {
+            var officeUpdates = await _office.CheckUpdatesAsync(progress, ct).ConfigureAwait(false);
+            MergeSpecialSourceRows(list, officeUpdates);
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"Office update check failed: {ex.Message}");
+        }
+
         progress?.Report(new ScanProgress { Message = "Matching upgrades to installed programs...", Percent = 80 });
 
         // If scan list is empty, still surface upgrades as their own rows
@@ -169,6 +223,10 @@ public sealed class ProgramDetectorService
             foreach (var program in list)
             {
                 if (_config.IsExcluded(program))
+                    continue;
+
+                // WSL / Office rows are already finalized by their dedicated services.
+                if (program.Source is PackageSource.Wsl or PackageSource.Office)
                     continue;
 
                 ProgramInfo? upgrade = null;
@@ -282,6 +340,10 @@ public sealed class ProgramDetectorService
                 continue;
             }
 
+            // WSL/Office use non-semver available labels ("Latest", "N package(s)", "Channel latest")
+            if (program.Source is PackageSource.Wsl or PackageSource.Office)
+                continue;
+
             if (VersionText.IsUnknown(program.AvailableVersion) ||
                 VersionComparer.IsNewer(GetEffectiveVersion(program), program.AvailableVersion) != true)
             {
@@ -303,15 +365,59 @@ public sealed class ProgramDetectorService
         return list;
     }
 
+    /// <summary>
+    /// Insert or refresh rows for non-winget sources (WSL, Office) that use stable package ids.
+    /// </summary>
+    private static void MergeSpecialSourceRows(List<ProgramInfo> list, IReadOnlyList<ProgramInfo> special)
+    {
+        foreach (var item in special)
+        {
+            if (string.IsNullOrWhiteSpace(item.PackageId))
+            {
+                list.Add(item.Clone());
+                continue;
+            }
+
+            var existing = list.FirstOrDefault(p =>
+                string.Equals(p.PackageId, item.PackageId, StringComparison.OrdinalIgnoreCase));
+            if (existing is null)
+            {
+                list.Add(item.Clone());
+                continue;
+            }
+
+            existing.Source = item.Source;
+            existing.Origin = string.IsNullOrWhiteSpace(item.Origin) ? existing.Origin : item.Origin;
+            existing.Publisher = string.IsNullOrWhiteSpace(item.Publisher) ? existing.Publisher : item.Publisher;
+            existing.Notes = item.Notes ?? existing.Notes;
+            if (!VersionText.IsUnknown(item.Version))
+                existing.Version = item.Version;
+            if (item.UpdateAvailable)
+            {
+                existing.UpdateAvailable = true;
+                existing.AvailableVersion = item.AvailableVersion;
+            }
+            else if (existing.Source is PackageSource.Wsl or PackageSource.Office)
+            {
+                // Keep special-source rows honest when their own check clears the flag
+                existing.UpdateAvailable = false;
+                existing.AvailableVersion = string.Empty;
+            }
+        }
+    }
+
     private static List<ProgramInfo> Deduplicate(List<ProgramInfo> programs)
     {
-        // Prefer winget > chocolatey > registry
+        // Prefer store/wsl/office-specific sources, then winget > chocolatey > registry
         int Priority(PackageSource s) => s switch
         {
-            PackageSource.Winget => 1,
-            PackageSource.Chocolatey => 2,
-            PackageSource.Registry => 3,
-            _ => 4
+            PackageSource.MicrosoftStore => 1,
+            PackageSource.Wsl => 1,
+            PackageSource.Office => 1,
+            PackageSource.Winget => 2,
+            PackageSource.Chocolatey => 3,
+            PackageSource.Registry => 4,
+            _ => 5
         };
 
         var ordered = programs

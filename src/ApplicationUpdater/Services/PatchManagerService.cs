@@ -15,6 +15,8 @@ public sealed class PatchManagerService
     private readonly WingetService _winget;
     private readonly GitHubUpdateService _github;
     private readonly WindowsUpdateService _windowsUpdate;
+    private readonly WslUpdateService _wsl;
+    private readonly OfficeUpdateService _office;
     private readonly LogService _log;
 
     public IReadOnlyList<ProgramInfo> Programs { get; private set; } = [];
@@ -28,6 +30,8 @@ public sealed class PatchManagerService
         WingetService winget,
         GitHubUpdateService github,
         WindowsUpdateService windowsUpdate,
+        WslUpdateService wsl,
+        OfficeUpdateService office,
         LogService log)
     {
         _config = config;
@@ -36,6 +40,8 @@ public sealed class PatchManagerService
         _winget = winget;
         _github = github;
         _windowsUpdate = windowsUpdate;
+        _wsl = wsl;
+        _office = office;
         _log = log;
     }
 
@@ -181,6 +187,10 @@ public sealed class PatchManagerService
                 result = await _github.InstallAsync(program, progress, completed, total, ct).ConfigureAwait(false);
             else if (program.Source is PackageSource.WindowsUpdate or PackageSource.Driver)
                 result = await _windowsUpdate.InstallAsync(program, progress, completed, total, ct).ConfigureAwait(false);
+            else if (program.Source is PackageSource.Wsl)
+                result = await _wsl.UpgradeAsync(program, progress, completed, total, ct).ConfigureAwait(false);
+            else if (program.Source is PackageSource.Office)
+                result = await _office.UpgradeAsync(program, progress, completed, total, ct).ConfigureAwait(false);
             else
             {
                 var map = await _installer.InstallUpdatesAsync([program], new Progress<UpdateProgress>(p =>
@@ -224,6 +234,8 @@ public sealed class PatchManagerService
             PackageSource.GitHub => _github.InstallAsync(program, null, 0, 1, ct),
             PackageSource.WindowsUpdate or PackageSource.Driver =>
                 _windowsUpdate.InstallAsync(program, null, 0, 1, ct),
+            PackageSource.Wsl => _wsl.UpgradeAsync(program, null, 0, 1, ct),
+            PackageSource.Office => _office.UpgradeAsync(program, null, 0, 1, ct),
             _ => _installer.InstallSingleAsync(program, ct)
         };
 

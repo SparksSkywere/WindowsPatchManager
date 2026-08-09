@@ -1,6 +1,6 @@
 # Windows Patch Manager
 
-Windows software update manager from **Skywere Industries**. Scan installed applications and install available updates using **Windows Package Manager (winget)**, **Chocolatey**, **GitHub Releases**, plus tabs for **driver updates** and **Windows Update / CVE patches**.
+Windows software update manager from **Skywere Industries**. Scan installed applications and install available updates using **Windows Package Manager (winget)**, **Microsoft Store** (msstore), **Chocolatey**, **GitHub Releases**, **Windows Subsystem for Linux (WSL)**, **Microsoft Office / Microsoft 365** (Click-to-Run), plus tabs for **driver updates** and **Windows Update / CVE** security scanning (MSRC Critical/Important KBs).
 
 This is the .NET release of Windows Patch Manager (replacing the earlier Python edition).
 
@@ -39,9 +39,9 @@ Publisher in Apps & Features: **Skywere Industries**.
 ### GUI
 
 1. Launch **Windows Patch Manager**
-2. Use tabs: **Programs** · **Drivers** · **Windows Updates / CVE**
-3. **Scan** loads the active tab
-4. **Check updates** queries upgrades (winget / Chocolatey / GitHub / WU)
+2. Use tabs: **Programs** · **Drivers** · **Windows Update / CVE**
+3. **Scan** loads the active tab (Windows Update tab also runs the CVE/KB security scan)
+4. **Check updates** queries upgrades (winget / Microsoft Store / Chocolatey / GitHub / WSL / Office / WU)
 5. Columns show **Current**, **Available**, **Progress %**, **Last updated**
 6. Select items (or **Update all**) to install
 
@@ -54,6 +54,24 @@ myorg/chronolog|Chronolog|Setup
 ```
 
 Optional PAT for rate limits / private repos. Enable **self-update** with `owner/repo` for this app when hosted on GitHub.
+
+### Extra update sources (Options → Update sources)
+| Source | How it works |
+|--------|----------------|
+| **Microsoft Store** | winget `msstore` source — Store apps are labeled and upgraded with `--source msstore` |
+| **WSL** | Platform via `wsl --update` / `Microsoft.WSL`; optional apt/dnf/zypper/pacman upgrades inside distros |
+| **Microsoft Office** | Click-to-Run via `OfficeC2RClient.exe /update` when Office/Microsoft 365 is installed |
+| **Windows Update / CVE** | Pending WU software patches with CVE + severity + KB; installed-KB inventory; optional [MSRC](https://api.msrc.microsoft.com/) gap scan for missing Critical/Important security KBs |
+
+### CVE / security KB scan
+On **Windows Update / CVE** (or initial full scan):
+
+1. Queries Windows Update for pending software (Security / Critical categories first)
+2. Extracts **KB** numbers, **CVE-####-…** IDs, and **MSRC severity**
+3. Builds an inventory of **already installed KBs**
+4. (Optional) Downloads recent MSRC monthly CVRF feeds and lists **required security KBs** for this Windows edition that are not installed and not already pending
+
+Configure under **Options → Update sources** (CVE scanner, prioritize security, security-only, MSRC online, months to scan).
 
 Shortcuts: `F5` scan · `F6` check updates · `Ctrl+S` export · `Esc` cancel  
 

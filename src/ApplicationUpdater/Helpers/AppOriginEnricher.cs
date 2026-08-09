@@ -193,6 +193,9 @@ public static partial class AppOriginEnricher
             PackageSource.GitHub => "GitHub",
             PackageSource.WindowsUpdate => "Windows Update",
             PackageSource.Driver => "Driver",
+            PackageSource.MicrosoftStore => "Microsoft Store",
+            PackageSource.Wsl => "WSL",
+            PackageSource.Office => "Microsoft Office",
             PackageSource.Registry => "Windows",
             _ => "Windows"
         };

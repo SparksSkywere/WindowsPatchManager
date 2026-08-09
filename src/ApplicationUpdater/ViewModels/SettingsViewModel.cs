@@ -21,6 +21,16 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _chocolateyEnabled;
     [ObservableProperty] private bool _gitHubEnabled;
     [ObservableProperty] private bool _windowsUpdateEnabled;
+    [ObservableProperty] private bool _cveScanEnabled;
+    [ObservableProperty] private bool _prioritizeSecurity;
+    [ObservableProperty] private bool _securityUpdatesOnly;
+    [ObservableProperty] private bool _queryMsrcOnline;
+    [ObservableProperty] private int _msrcMonthsToScan = 3;
+    [ObservableProperty] private bool _msrcCriticalAndImportantOnly = true;
+    [ObservableProperty] private bool _microsoftStoreEnabled;
+    [ObservableProperty] private bool _wslEnabled;
+    [ObservableProperty] private bool _wslIncludeDistroPackages;
+    [ObservableProperty] private bool _microsoftOfficeEnabled;
     [ObservableProperty] private string _gitHubReposText = string.Empty;
     [ObservableProperty] private string _gitHubToken = string.Empty;
     [ObservableProperty] private bool _selfUpdateEnabled;
@@ -75,6 +85,16 @@ public partial class SettingsViewModel : ObservableObject
         ChocolateyEnabled = c.UpdateSources.Chocolatey.Enabled;
         GitHubEnabled = c.UpdateSources.GitHub.Enabled && c.GitHub.Enabled;
         WindowsUpdateEnabled = c.WindowsUpdate.Enabled;
+        CveScanEnabled = c.WindowsUpdate.CveScanEnabled;
+        PrioritizeSecurity = c.WindowsUpdate.PrioritizeSecurity;
+        SecurityUpdatesOnly = c.WindowsUpdate.SecurityUpdatesOnly;
+        QueryMsrcOnline = c.WindowsUpdate.QueryMsrcOnline;
+        MsrcMonthsToScan = Math.Clamp(c.WindowsUpdate.MsrcMonthsToScan, 1, 6);
+        MsrcCriticalAndImportantOnly = c.WindowsUpdate.MsrcCriticalAndImportantOnly;
+        MicrosoftStoreEnabled = c.UpdateSources.MicrosoftStore.Enabled;
+        WslEnabled = c.UpdateSources.Wsl.Enabled && c.Wsl.Enabled;
+        WslIncludeDistroPackages = c.Wsl.IncludeDistroPackages;
+        MicrosoftOfficeEnabled = c.UpdateSources.MicrosoftOffice.Enabled;
         GitHubToken = c.GitHub.Token ?? string.Empty;
         SelfUpdateEnabled = c.GitHub.SelfUpdate.Enabled;
         SelfUpdateRepo = string.IsNullOrWhiteSpace(c.GitHub.SelfUpdate.Owner)
@@ -126,6 +146,17 @@ public partial class SettingsViewModel : ObservableObject
         c.GitHub.Token = string.IsNullOrWhiteSpace(GitHubToken) ? null : GitHubToken.Trim();
         c.WindowsUpdate.Enabled = WindowsUpdateEnabled;
         c.WindowsUpdate.IncludeDrivers = WindowsUpdateEnabled;
+        c.WindowsUpdate.CveScanEnabled = CveScanEnabled;
+        c.WindowsUpdate.PrioritizeSecurity = PrioritizeSecurity;
+        c.WindowsUpdate.SecurityUpdatesOnly = SecurityUpdatesOnly;
+        c.WindowsUpdate.QueryMsrcOnline = QueryMsrcOnline;
+        c.WindowsUpdate.MsrcMonthsToScan = Math.Clamp(MsrcMonthsToScan, 1, 6);
+        c.WindowsUpdate.MsrcCriticalAndImportantOnly = MsrcCriticalAndImportantOnly;
+        c.UpdateSources.MicrosoftStore.Enabled = MicrosoftStoreEnabled;
+        c.UpdateSources.Wsl.Enabled = WslEnabled;
+        c.Wsl.Enabled = WslEnabled;
+        c.Wsl.IncludeDistroPackages = WslIncludeDistroPackages;
+        c.UpdateSources.MicrosoftOffice.Enabled = MicrosoftOfficeEnabled;
         c.GitHub.SelfUpdate.Enabled = SelfUpdateEnabled;
         if (!string.IsNullOrWhiteSpace(SelfUpdateRepo) && SelfUpdateRepo.Contains('/'))
         {

@@ -55,6 +55,12 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _isInstallTab;
     [ObservableProperty] private bool _isUninstallTab;
 
+    /// <summary>
+    /// Header checkbox: true = all selected, false = none, null = partial.
+    /// Writing true/false selects or clears all rows on the active tab.
+    /// </summary>
+    [ObservableProperty] private bool? _selectAllChecked = false;
+
     public MainViewModel(PatchManagerService patchManager, SchedulerService scheduler, LogService log)
     {
         _patchManager = patchManager;
@@ -73,6 +79,9 @@ public partial class MainViewModel : ObservableObject
 
         WindowsUpdatesView = CollectionViewSource.GetDefaultView(WindowsUpdates);
         WindowsUpdatesView.Filter = FilterProgram;
+        // Critical / Important security first, then name
+        WindowsUpdatesView.SortDescriptions.Add(new SortDescription(nameof(ProgramItemViewModel.SeverityRank), ListSortDirection.Ascending));
+        WindowsUpdatesView.SortDescriptions.Add(new SortDescription(nameof(ProgramItemViewModel.IsSecurityUpdate), ListSortDirection.Descending));
         WindowsUpdatesView.SortDescriptions.Add(new SortDescription(nameof(ProgramItemViewModel.Name), ListSortDirection.Ascending));
 
         InstallResultsView = CollectionViewSource.GetDefaultView(InstallResults);
@@ -143,6 +152,19 @@ public partial class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(ActiveView));
         RefreshSummary();
         UpdateEmptyState();
+        UpdateSelectAllHeader();
+    }
+
+    /// <summary>
+    /// Header tick-all: if every row is selected, clear selection; otherwise select all.
+    /// </summary>
+    [RelayCommand]
+    private void ToggleSelectAll()
+    {
+        if (ActiveList.Count > 0 && ActiveList.All(p => p.IsSelected))
+            SelectNone();
+        else
+            SelectAll();
     }
 
     private bool FilterProgram(object obj)
@@ -162,7 +184,10 @@ public partial class MainViewModel : ObservableObject
                item.PackageId.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                item.Publisher.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                item.Source.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-               item.AvailableVersion.Contains(q, StringComparison.OrdinalIgnoreCase);
+               item.AvailableVersion.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+               item.Severity.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+               item.CveIds.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+               item.KbId.Contains(q, StringComparison.OrdinalIgnoreCase);
     }
 
     [RelayCommand]
@@ -192,13 +217,16 @@ public partial class MainViewModel : ObservableObject
             var drivers = await _patchManager.ScanDriversAsync(progress, ct).ConfigureAwait(false);
             UiThread.Send(() => ReplaceList(Drivers, drivers));
 
-            progress.Report(new ScanProgress { Message = "Scanning Windows Update…", Percent = 75 });
+            progress.Report(new ScanProgress { Message = "Scanning Windows Update / CVE…", Percent = 75 });
             var wu = await _patchManager.ScanWindowsUpdatesAsync(progress, ct).ConfigureAwait(false);
             UiThread.Send(() =>
             {
                 ReplaceList(WindowsUpdates, wu);
+                var critical = WindowsUpdates.Count(i =>
+                    string.Equals(i.Severity, "Critical", StringComparison.OrdinalIgnoreCase));
                 StatusText =
-                    $"Scan complete · {Programs.Count} apps · {Drivers.Count} drivers · {WindowsUpdates.Count} Windows updates";
+                    $"Scan complete · {Programs.Count} apps · {Drivers.Count} drivers · {WindowsUpdates.Count} Windows/CVE updates" +
+                    (critical > 0 ? $" · {critical} Critical" : "");
             });
         }).ConfigureAwait(true);
     }
@@ -539,6 +567,23 @@ public partial class MainViewModel : ObservableObject
         RefreshSelectionCount();
     }
 
+    /// <summary>Sync header tick-all checkbox with current row selection.</summary>
+    private void UpdateSelectAllHeader()
+    {
+        if (ActiveList.Count == 0)
+        {
+            SelectAllChecked = false;
+            return;
+        }
+
+        var selected = ActiveList.Count(p => p.IsSelected);
+        SelectAllChecked = selected == 0
+            ? false
+            : selected == ActiveList.Count
+                ? true
+                : null;
+    }
+
     [RelayCommand]
     private void Export()
     {
@@ -851,6 +896,7 @@ public partial class MainViewModel : ObservableObject
     private void RefreshSelectionCount()
     {
         SelectedCount = ActiveList.Count(p => p.IsSelected);
+        UpdateSelectAllHeader();
         RefreshSummary();
     }
 

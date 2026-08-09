@@ -71,9 +71,35 @@
 
                         <TextBlock Text="Update sources" Style="{StaticResource SectionHeaderStyle}" Margin="0,18,0,8"/>
                         <CheckBox Content="Windows Package Manager (winget)" IsChecked="{Binding WingetEnabled}"/>
+                        <CheckBox Content="Microsoft Store (winget msstore source)" IsChecked="{Binding MicrosoftStoreEnabled}"/>
                         <CheckBox Content="Chocolatey" IsChecked="{Binding ChocolateyEnabled}"/>
                         <CheckBox Content="GitHub Releases" IsChecked="{Binding GitHubEnabled}"/>
-                        <CheckBox Content="Windows Update / Drivers / CVE patches" IsChecked="{Binding WindowsUpdateEnabled}"/>
+                        <CheckBox Content="Windows Update / Drivers" IsChecked="{Binding WindowsUpdateEnabled}"/>
+                        <CheckBox Content="CVE / security KB scanner (MSRC + WU)" IsChecked="{Binding CveScanEnabled}"
+                                  IsEnabled="{Binding WindowsUpdateEnabled}" Margin="20,0,0,0"/>
+                        <CheckBox Content="Prioritize Critical / Important security updates" IsChecked="{Binding PrioritizeSecurity}"
+                                  IsEnabled="{Binding CveScanEnabled}" Margin="20,0,0,0"/>
+                        <CheckBox Content="Show security updates only (hide quality/feature)" IsChecked="{Binding SecurityUpdatesOnly}"
+                                  IsEnabled="{Binding CveScanEnabled}" Margin="20,0,0,0"/>
+                        <CheckBox Content="Query MSRC online for CVE → KB gaps" IsChecked="{Binding QueryMsrcOnline}"
+                                  IsEnabled="{Binding CveScanEnabled}" Margin="20,0,0,0"/>
+                        <CheckBox Content="MSRC: Critical and Important only" IsChecked="{Binding MsrcCriticalAndImportantOnly}"
+                                  IsEnabled="{Binding QueryMsrcOnline}" Margin="40,0,0,0"/>
+                        <StackPanel Orientation="Horizontal" Margin="40,4,0,0">
+                            <TextBlock Text="MSRC months to scan:" VerticalAlignment="Center" Width="140"
+                                       Style="{StaticResource MutedTextStyle}"/>
+                            <TextBox Width="40" Text="{Binding MsrcMonthsToScan}"
+                                     IsEnabled="{Binding QueryMsrcOnline}"/>
+                        </StackPanel>
+                        <TextBlock Text="CVE scan inventories installed KBs, ranks pending WU security patches, and cross-checks Microsoft MSRC for missing Critical/Important KBs."
+                                   Style="{StaticResource MutedTextStyle}" Margin="20,4,0,8" TextWrapping="Wrap"/>
+                        <CheckBox Content="Windows Subsystem for Linux (WSL)" IsChecked="{Binding WslEnabled}"/>
+                        <CheckBox Content="WSL distro package upgrades (apt/dnf/…)" IsChecked="{Binding WslIncludeDistroPackages}"
+                                  Margin="20,0,0,0"
+                                  IsEnabled="{Binding WslEnabled}"/>
+                        <CheckBox Content="Microsoft Office / Microsoft 365 (Click-to-Run)" IsChecked="{Binding MicrosoftOfficeEnabled}"/>
+                        <TextBlock Text="Store apps use winget’s msstore source. WSL uses wsl --update and optional in-distro package managers. Office uses OfficeC2RClient."
+                                   Style="{StaticResource MutedTextStyle}" Margin="0,6,0,0" TextWrapping="Wrap"/>
 
                         <TextBlock Text="GitHub tracked projects" Style="{StaticResource SectionHeaderStyle}" Margin="0,18,0,8"/>
                         <TextBlock Text="One repo per line: owner/repo|Display Name|assetPattern  (example: myorg/chronolog|Chronolog|.exe)"

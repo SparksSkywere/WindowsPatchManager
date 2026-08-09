@@ -21,6 +21,18 @@
     "gitHub": {
       "enabled": true,
       "priority": 3
+    },
+    "microsoftStore": {
+      "enabled": true,
+      "priority": 4
+    },
+    "wsl": {
+      "enabled": true,
+      "priority": 5
+    },
+    "microsoftOffice": {
+      "enabled": true,
+      "priority": 6
     }
   },
   "github": {
@@ -45,7 +57,17 @@
   "windowsUpdate": {
     "enabled": true,
     "includeDrivers": true,
-    "includeOptional": false
+    "includeOptional": false,
+    "cveScanEnabled": true,
+    "prioritizeSecurity": true,
+    "securityUpdatesOnly": false,
+    "queryMsrcOnline": true,
+    "msrcMonthsToScan": 3,
+    "msrcCriticalAndImportantOnly": true
+  },
+  "wsl": {
+    "enabled": true,
+    "includeDistroPackages": true
   },
   "exclusions": {
     "programs": [],

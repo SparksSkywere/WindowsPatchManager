@@ -16,6 +16,9 @@ public sealed class AppConfig
     [JsonPropertyName("windowsUpdate")]
     public WindowsUpdateSettings WindowsUpdate { get; set; } = new();
 
+    [JsonPropertyName("wsl")]
+    public WslSettings Wsl { get; set; } = new();
+
     [JsonPropertyName("exclusions")]
     public ExclusionSettings Exclusions { get; set; } = new();
 
@@ -53,6 +56,32 @@ public sealed class UpdateSourcesSettings
     public SourceToggle Winget { get; set; } = new() { Enabled = true, Priority = 1 };
     public SourceToggle Chocolatey { get; set; } = new() { Enabled = true, Priority = 2 };
     public SourceToggle GitHub { get; set; } = new() { Enabled = true, Priority = 3 };
+
+    /// <summary>
+    /// Microsoft Store apps via winget source "msstore" (and Store package IDs).
+    /// </summary>
+    public SourceToggle MicrosoftStore { get; set; } = new() { Enabled = true, Priority = 4 };
+
+    /// <summary>
+    /// Windows Subsystem for Linux platform (<c>wsl --update</c> / Microsoft.WSL) and distro package upgrades.
+    /// </summary>
+    public SourceToggle Wsl { get; set; } = new() { Enabled = true, Priority = 5 };
+
+    /// <summary>
+    /// Microsoft 365 / Office Click-to-Run updates via OfficeC2RClient.
+    /// </summary>
+    public SourceToggle MicrosoftOffice { get; set; } = new() { Enabled = true, Priority = 6 };
+}
+
+/// <summary>WSL-specific scan/update options.</summary>
+public sealed class WslSettings
+{
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// When true, also probe installed distros for package manager upgrades (apt/dnf/zypper/pacman).
+    /// </summary>
+    public bool IncludeDistroPackages { get; set; } = true;
 }
 
 /// <summary>Track GitHub release-based apps (including this app if self-update is set).</summary>
@@ -89,6 +118,34 @@ public sealed class WindowsUpdateSettings
     public bool Enabled { get; set; } = true;
     public bool IncludeDrivers { get; set; } = true;
     public bool IncludeOptional { get; set; }
+
+    /// <summary>
+    /// When true, the Windows Update tab runs a CVE/KB security scan:
+    /// extracts CVEs from pending updates, ranks Critical/Important, inventories
+    /// installed KBs, and optionally cross-references MSRC for missing security KBs.
+    /// </summary>
+    public bool CveScanEnabled { get; set; } = true;
+
+    /// <summary>Sort and highlight security updates ahead of quality/feature patches.</summary>
+    public bool PrioritizeSecurity { get; set; } = true;
+
+    /// <summary>When true, only list security / critical updates (hide non-security software updates).</summary>
+    public bool SecurityUpdatesOnly { get; set; }
+
+    /// <summary>
+    /// When true, query Microsoft Security Response Center (MSRC) online for recent
+    /// Critical/Important CVEs and required KBs not yet installed.
+    /// </summary>
+    public bool QueryMsrcOnline { get; set; } = true;
+
+    /// <summary>How many recent monthly MSRC releases to scan for CVE→KB gaps (1–6).</summary>
+    public int MsrcMonthsToScan { get; set; } = 3;
+
+    /// <summary>
+    /// When true (default), MSRC gap scan keeps Critical and Important only.
+    /// When false, also includes Moderate severity CVEs for the local OS.
+    /// </summary>
+    public bool MsrcCriticalAndImportantOnly { get; set; } = true;
 }
 
 public sealed class SourceToggle

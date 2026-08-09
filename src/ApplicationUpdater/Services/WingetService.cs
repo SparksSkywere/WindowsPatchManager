@@ -94,14 +94,19 @@ public sealed class WingetService
                 !id.Contains("ARP", StringComparison.OrdinalIgnoreCase))
                 continue;
 
+            row.Columns.TryGetValue("Source", out var listSource);
+
             var program = new ProgramInfo
             {
                 Name = name.Trim(),
                 PackageId = id.Trim(),
                 Version = string.IsNullOrWhiteSpace(version) ? "Unknown" : version.Trim(),
-                Source = PackageSource.Winget,
-                AvailableVersion = string.IsNullOrWhiteSpace(available) ? string.Empty : available.Trim()
+                Source = ResolvePackageSource(listSource, id),
+                AvailableVersion = string.IsNullOrWhiteSpace(available) ? string.Empty : available.Trim(),
+                Notes = string.IsNullOrWhiteSpace(listSource) ? null : listSource.Trim()
             };
+
+            ApplyOriginHints(program, listSource);
 
             // Steam games via winget ARP bridge — mark origin early so UI isn't blank
             // before registry merge / AppOriginEnricher.
@@ -165,17 +170,19 @@ public sealed class WingetService
             if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(id) || id.Contains(' '))
                 continue;
 
-            programs.Add(new ProgramInfo
+            var item = new ProgramInfo
             {
                 Name = name.Trim(),
                 PackageId = id.Trim(),
                 Version = string.IsNullOrWhiteSpace(version) ? "—" : version.Trim(),
                 AvailableVersion = string.IsNullOrWhiteSpace(version) ? "—" : version.Trim(),
-                Source = PackageSource.Winget,
+                Source = ResolvePackageSource(source, id),
                 UpdateAvailable = false,
                 Notes = string.IsNullOrWhiteSpace(match) ? source : match,
                 Publisher = string.IsNullOrWhiteSpace(source) ? "winget" : source.Trim()
-            });
+            };
+            ApplyOriginHints(item, source);
+            programs.Add(item);
         }
 
         _log.Info($"winget search \"{query}\": {programs.Count} result(s).");
@@ -489,6 +496,54 @@ public sealed class WingetService
         if (!await IsAvailableAsync(ct).ConfigureAwait(false))
             return [];
 
+        // Default catalog (winget + any enabled sources winget includes)
+        var upgrades = await ListUpgradesForSourceAsync(source: null, ct).ConfigureAwait(false);
+        var byId = new Dictionary<string, ProgramInfo>(StringComparer.OrdinalIgnoreCase);
+        foreach (var u in upgrades)
+        {
+            if (!string.IsNullOrWhiteSpace(u.PackageId))
+                byId[u.PackageId] = u;
+        }
+
+        // Explicit Microsoft Store pass when enabled (ensures msstore packages surface even if
+        // the combined upgrade view omits them or sources were not refreshed).
+        if (_config.Config.UpdateSources.MicrosoftStore.Enabled)
+        {
+            try
+            {
+                await EnsureMsStoreSourceAsync(ct).ConfigureAwait(false);
+                var store = await ListUpgradesForSourceAsync("msstore", ct).ConfigureAwait(false);
+                foreach (var u in store)
+                {
+                    if (string.IsNullOrWhiteSpace(u.PackageId))
+                        continue;
+                    if (byId.ContainsKey(u.PackageId))
+                        continue;
+                    byId[u.PackageId] = u;
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"Microsoft Store (msstore) upgrade query failed: {ex.Message}");
+            }
+        }
+
+        var list = byId.Values.ToList();
+
+        // Drop Microsoft Store rows when that source is disabled in Options
+        if (!_config.Config.UpdateSources.MicrosoftStore.Enabled)
+        {
+            list = list.Where(p => p.Source != PackageSource.MicrosoftStore).ToList();
+        }
+
+        _log.Info($"winget upgrade listed {list.Count} package(s) after version filter (incl. Store when enabled).");
+        return list;
+    }
+
+    private async Task<IReadOnlyList<ProgramInfo>> ListUpgradesForSourceAsync(
+        string? source,
+        CancellationToken ct)
+    {
         var behavior = _config.Config.UpdateBehavior;
         var args = new List<string>
         {
@@ -496,6 +551,12 @@ public sealed class WingetService
             "--accept-source-agreements",
             "--disable-interactivity"
         };
+
+        if (!string.IsNullOrWhiteSpace(source))
+        {
+            args.Add("--source");
+            args.Add(source.Trim());
+        }
 
         if (behavior.IncludeUnknown)
             args.Add("--include-unknown");
@@ -509,9 +570,12 @@ public sealed class WingetService
         if (string.IsNullOrWhiteSpace(output))
             output = result.StdErr;
 
-        if (output.Contains("No installed package has an available upgrade", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(output) ||
+            output.Contains("No installed package has an available upgrade", StringComparison.OrdinalIgnoreCase) ||
+            output.Contains("No installed package found matching input criteria", StringComparison.OrdinalIgnoreCase))
         {
-            _log.Info("winget reports no upgrades available.");
+            if (string.IsNullOrWhiteSpace(source))
+                _log.Info("winget reports no upgrades available.");
             return [];
         }
 
@@ -524,7 +588,7 @@ public sealed class WingetService
             row.Columns.TryGetValue("Id", out var id);
             row.Columns.TryGetValue("Version", out var version);
             row.Columns.TryGetValue("Available", out var available);
-            row.Columns.TryGetValue("Source", out var source);
+            row.Columns.TryGetValue("Source", out var rowSource);
 
             if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(id))
                 continue;
@@ -545,20 +609,96 @@ public sealed class WingetService
                 VersionComparer.IsNewer(installed, availableVer) != true)
                 continue;
 
-            upgrades.Add(new ProgramInfo
+            // Prefer explicit source filter when the table omits Source column
+            var effectiveSource = !string.IsNullOrWhiteSpace(rowSource) ? rowSource : source;
+            var program = new ProgramInfo
             {
                 Name = name.Trim(),
                 PackageId = id.Trim(),
                 Version = installed,
                 AvailableVersion = availableVer,
                 UpdateAvailable = true,
-                Source = PackageSource.Winget,
-                Notes = string.IsNullOrWhiteSpace(source) ? null : source.Trim()
-            });
+                Source = ResolvePackageSource(effectiveSource, id),
+                Notes = string.IsNullOrWhiteSpace(effectiveSource) ? null : effectiveSource.Trim()
+            };
+            ApplyOriginHints(program, effectiveSource);
+            upgrades.Add(program);
         }
 
-        _log.Info($"winget upgrade listed {upgrades.Count} package(s) after version filter.");
         return upgrades;
+    }
+
+    /// <summary>
+    /// Ensures the msstore winget source is registered (best-effort; never fails the scan).
+    /// </summary>
+    public async Task EnsureMsStoreSourceAsync(CancellationToken ct = default)
+    {
+        if (!await IsAvailableAsync(ct).ConfigureAwait(false))
+            return;
+
+        var list = await ProcessRunner.RunAsync(
+            "winget",
+            ["source", "list", "--disable-interactivity"],
+            ct,
+            timeoutSeconds: 60).ConfigureAwait(false);
+
+        var text = list.StdOut + "\n" + list.StdErr;
+        if (text.Contains("msstore", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        _log.Info("Registering winget source 'msstore' for Microsoft Store packages…");
+        var add = await ProcessRunner.RunAsync(
+            "winget",
+            [
+                "source", "add",
+                "--name", "msstore",
+                "--arg", "https://storeedgefd.dsx.mp.microsoft.com/v9.0",
+                "--accept-source-agreements",
+                "--disable-interactivity"
+            ],
+            ct,
+            timeoutSeconds: 90).ConfigureAwait(false);
+
+        if (!add.Success &&
+            !add.CombinedOutput.Contains("already exists", StringComparison.OrdinalIgnoreCase))
+        {
+            _log.Warn($"Could not add msstore source: {add.CombinedOutput.Trim()}");
+        }
+    }
+
+    internal static PackageSource ResolvePackageSource(string? wingetSource, string? packageId)
+    {
+        if (!string.IsNullOrWhiteSpace(wingetSource) &&
+            wingetSource.Contains("msstore", StringComparison.OrdinalIgnoreCase))
+            return PackageSource.MicrosoftStore;
+
+        // Store product IDs often look like 9NBLGGH4NNS1 / XP8K0HKJFRXGCK
+        if (!string.IsNullOrWhiteSpace(packageId) &&
+            packageId.Length is >= 10 and <= 20 &&
+            packageId.StartsWith("9", StringComparison.OrdinalIgnoreCase) &&
+            packageId.All(ch => char.IsLetterOrDigit(ch)))
+            return PackageSource.MicrosoftStore;
+
+        if (!string.IsNullOrWhiteSpace(packageId) &&
+            packageId.StartsWith("XP", StringComparison.OrdinalIgnoreCase) &&
+            packageId.Length > 10 &&
+            packageId.All(ch => char.IsLetterOrDigit(ch)))
+            return PackageSource.MicrosoftStore;
+
+        return PackageSource.Winget;
+    }
+
+    internal static void ApplyOriginHints(ProgramInfo program, string? wingetSource)
+    {
+        if (program.Source == PackageSource.MicrosoftStore ||
+            (!string.IsNullOrWhiteSpace(wingetSource) &&
+             wingetSource.Contains("msstore", StringComparison.OrdinalIgnoreCase)))
+        {
+            program.Source = PackageSource.MicrosoftStore;
+            program.Origin = "Microsoft Store";
+            if (string.IsNullOrWhiteSpace(program.Publisher))
+                program.Publisher = "Microsoft Store";
+        }
     }
 
     public async Task<UpdateResult> UpgradeAsync(ProgramInfo program, CancellationToken ct = default)
@@ -748,6 +888,8 @@ public sealed class WingetService
             "--accept-package-agreements"
         };
 
+        AppendSourceArg(args, program);
+
         if (interactive)
             args.Add("--interactive");
         else
@@ -779,6 +921,8 @@ public sealed class WingetService
             "--accept-package-agreements"
         };
 
+        AppendSourceArg(args, program);
+
         if (!string.IsNullOrWhiteSpace(version))
         {
             args.Add("--version");
@@ -797,6 +941,17 @@ public sealed class WingetService
             args.Add("--force");
 
         return args;
+    }
+
+    private static void AppendSourceArg(List<string> args, ProgramInfo program)
+    {
+        if (program.Source == PackageSource.MicrosoftStore ||
+            string.Equals(program.Notes, "msstore", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(program.Origin, "Microsoft Store", StringComparison.OrdinalIgnoreCase))
+        {
+            args.Add("--source");
+            args.Add("msstore");
+        }
     }
 
     private static bool IsSuccessful(ProcessResult proc)

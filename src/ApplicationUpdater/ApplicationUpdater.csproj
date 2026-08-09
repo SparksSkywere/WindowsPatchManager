@@ -17,10 +17,10 @@
     <Company>Skywere Industries</Company>
     <Authors>Skywere Industries</Authors>
     <Copyright>Copyright © Skywere Industries</Copyright>
-    <Description>Manage software updates on Windows using winget and Chocolatey.</Description>
-    <Version>2.1.14</Version>
-    <FileVersion>2.1.14</FileVersion>
-    <AssemblyVersion>2.1.14.0</AssemblyVersion>
+    <Description>Manage software updates on Windows using winget, Microsoft Store, Chocolatey, WSL, Office, Windows Update, and CVE/KB security scanning.</Description>
+    <Version>2.3.0</Version>
+    <FileVersion>2.3.0</FileVersion>
+    <AssemblyVersion>2.3.0.0</AssemblyVersion>
     <NeutralLanguage>en-US</NeutralLanguage>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>

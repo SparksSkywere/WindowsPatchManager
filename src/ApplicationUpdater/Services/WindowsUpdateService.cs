@@ -1,37 +1,63 @@
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using ApplicationUpdater.Models;
 
 namespace ApplicationUpdater.Services;
 
 /// <summary>
-/// Windows Update Agent COM API — pending software/driver updates and install history.
+/// Windows Update Agent COM API — pending software/driver updates, install history,
+/// CVE/severity enrichment, installed-KB inventory, and optional MSRC gap analysis.
 /// </summary>
 public sealed class WindowsUpdateService
 {
+    // WU category GUIDs (IUpdateService / category catalog)
+    private const string CategorySecurityUpdates = "0FA1201D-4330-4FA8-8AE9-B877473B6441";
+    private const string CategoryCriticalUpdates = "E0789628-CE08-4437-BE74-2495B842F43B";
+    private const string CategoryDrivers = "EBFC1FC5-71A4-4F7B-9ACA-3B9A503104A0";
+
+    private static readonly Regex CveRegex = new(
+        @"CVE-\d{4}-\d{4,}",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex KbRegex = new(
+        @"KB\d{6,7}",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private readonly ConfigService _config;
     private readonly LogService _log;
+    private readonly MsrcCveService _msrc;
 
-    public WindowsUpdateService(ConfigService config, LogService log)
+    public WindowsUpdateService(ConfigService config, LogService log, MsrcCveService msrc)
     {
         _config = config;
         _log = log;
+        _msrc = msrc;
     }
 
-    public Task<IReadOnlyList<ProgramInfo>> SearchSoftwareUpdatesAsync(
+    public async Task<IReadOnlyList<ProgramInfo>> SearchSoftwareUpdatesAsync(
         IProgress<ScanProgress>? progress,
         CancellationToken ct)
-        => Task.Run(() => SearchPending(softwareOnly: true, progress, ct), ct);
+    {
+        // COM work off the UI thread; MSRC is async HTTP.
+        var pending = await Task.Run(() => SearchPending(softwareOnly: true, progress, ct), ct)
+            .ConfigureAwait(false);
+
+        if (!_config.Config.WindowsUpdate.CveScanEnabled)
+            return pending;
+
+        return await RunCveSecurityScanAsync(pending.ToList(), progress, ct).ConfigureAwait(false);
+    }
 
     public Task<IReadOnlyList<ProgramInfo>> SearchDriverUpdatesAsync(
         IProgress<ScanProgress>? progress,
         CancellationToken ct)
-        => Task.Run(() => SearchPending(softwareOnly: false, progress, ct), ct);
+        => Task.Run(() => (IReadOnlyList<ProgramInfo>)SearchPending(softwareOnly: false, progress, ct), ct);
 
     public Task<IReadOnlyList<ProgramInfo>> GetInstallHistoryAsync(
         bool driversOnly,
         IProgress<ScanProgress>? progress,
         CancellationToken ct)
-        => Task.Run(() => QueryHistory(driversOnly, progress, ct), ct);
+        => Task.Run(() => (IReadOnlyList<ProgramInfo>)QueryHistory(driversOnly, progress, ct), ct);
 
     public Task<UpdateResult> InstallAsync(
         ProgramInfo program,
@@ -41,7 +67,94 @@ public sealed class WindowsUpdateService
         CancellationToken ct)
         => Task.Run(() => InstallInternal(program, progress, completed, total, ct), ct);
 
-    private IReadOnlyList<ProgramInfo> SearchPending(
+    /// <summary>
+    /// Full CVE/KB security pass: enrich pending WU rows, inventory installed KBs,
+    /// optionally cross-reference MSRC for missing Critical/Important security KBs.
+    /// </summary>
+    private async Task<IReadOnlyList<ProgramInfo>> RunCveSecurityScanAsync(
+        List<ProgramInfo> pending,
+        IProgress<ScanProgress>? progress,
+        CancellationToken ct)
+    {
+        var settings = _config.Config.WindowsUpdate;
+
+        progress?.Report(new ScanProgress { Message = "Inventorying installed security KBs…", Percent = 55 });
+        var installedKbs = await Task.Run(() => GetInstalledKbSet(ct), ct).ConfigureAwait(false);
+        _log.Info($"Installed KB inventory: {installedKbs.Count} hotfix(es).");
+
+        // Mark pending updates that install KBs already present (rare race) as lower priority notes
+        foreach (var p in pending)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(p.KbId))
+                continue;
+            var nums = ExtractKbNumbers(p.KbId);
+            if (nums.Count > 0 && nums.All(n => installedKbs.Contains(n) || installedKbs.Contains("KB" + n)))
+            {
+                p.Notes = string.IsNullOrWhiteSpace(p.Notes)
+                    ? "KB appears already installed (inventory)"
+                    : p.Notes + " · KB appears already installed";
+            }
+        }
+
+        if (settings.QueryMsrcOnline)
+        {
+            progress?.Report(new ScanProgress { Message = "Cross-referencing MSRC CVE database…", Percent = 65 });
+            await _msrc.EnrichPendingWithMsrcAsync(pending, progress, ct).ConfigureAwait(false);
+
+            var missing = await _msrc.FindMissingSecurityKbsAsync(installedKbs, pending, progress, ct)
+                .ConfigureAwait(false);
+
+            foreach (var m in missing)
+            {
+                // Avoid duplicates by KB
+                var norm = MsrcCveService.NormalizeKb(m.KbId ?? "");
+                if (pending.Any(p => ExtractKbNumbers(p.KbId).Contains(norm)))
+                    continue;
+                pending.Add(m);
+            }
+        }
+
+        if (settings.SecurityUpdatesOnly)
+        {
+            pending = pending
+                .Where(p => p.IsSecurityUpdate ||
+                            (!string.IsNullOrWhiteSpace(p.Severity) &&
+                             p.Severity is "Critical" or "Important") ||
+                            string.Equals(p.Origin, "MSRC CVE", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+
+        if (settings.PrioritizeSecurity)
+        {
+            pending = pending
+                .OrderBy(p => p.SeverityRank)
+                .ThenByDescending(p => p.IsSecurityUpdate)
+                .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        var critical = pending.Count(p =>
+            string.Equals(p.Severity, "Critical", StringComparison.OrdinalIgnoreCase));
+        var important = pending.Count(p =>
+            string.Equals(p.Severity, "Important", StringComparison.OrdinalIgnoreCase));
+        var withCve = pending.Count(p => !string.IsNullOrWhiteSpace(p.CveIds));
+
+        progress?.Report(new ScanProgress
+        {
+            Message = pending.Count == 0
+                ? "No Windows / CVE security updates required"
+                : $"Found {pending.Count} update(s) · {critical} Critical · {important} Important · {withCve} with CVE",
+            Percent = 100
+        });
+        _log.Info(
+            $"Windows Update / CVE scan: {pending.Count} item(s) " +
+            $"({critical} Critical, {important} Important, {withCve} CVE-linked).");
+
+        return pending;
+    }
+
+    private List<ProgramInfo> SearchPending(
         bool softwareOnly,
         IProgress<ScanProgress>? progress,
         CancellationToken ct)
@@ -61,15 +174,10 @@ public sealed class WindowsUpdateService
             dynamic searcher = session.CreateUpdateSearcher();
             TrySetOnline(searcher);
 
-            // WU criteria: Type is 'Software' or 'Driver' (string), not integer.
-            // Also try a broad search and filter if typed search returns nothing.
+            // Prefer security / critical categories first for software, then full software set.
             var criteriaList = softwareOnly
-                ? new[]
-                {
-                    "IsInstalled=0 and IsHidden=0 and Type='Software'",
-                    "IsInstalled=0 and IsHidden=0"
-                }
-                : new[]
+                ? BuildSoftwareCriteria()
+                : new List<string>
                 {
                     "IsInstalled=0 and IsHidden=0 and Type='Driver'",
                     "IsInstalled=0 and IsHidden=0"
@@ -78,12 +186,15 @@ public sealed class WindowsUpdateService
             if (!_config.Config.WindowsUpdate.IncludeOptional)
             {
                 criteriaList = criteriaList
-                    .Select(c => c + " and BrowseOnly=0")
-                    .ToArray();
+                    .Select(c => c.Contains("BrowseOnly=", StringComparison.Ordinal)
+                        ? c
+                        : c + " and BrowseOnly=0")
+                    .ToList();
             }
 
             List<ProgramInfo> list = [];
             Exception? lastError = null;
+            var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var criteria in criteriaList)
             {
@@ -91,17 +202,42 @@ public sealed class WindowsUpdateService
                 try
                 {
                     _log.Info($"WU search criteria: {criteria}");
-                    progress?.Report(new ScanProgress { Message = $"Querying Windows Update ({label})…", Percent = 20 });
+                    progress?.Report(new ScanProgress
+                    {
+                        Message = $"Querying Windows Update ({label})…",
+                        Percent = 15
+                    });
                     dynamic result = searcher.Search(criteria);
-                    list = MapUpdates(result.Updates, softwareOnly, !softwareOnly, progress, ct);
-                    // For broad search (second criteria), filter by type
-                    if (criteria.Contains("Type=", StringComparison.Ordinal))
+                    // Pass Updates as object so MapUpdates is bound statically (not dynamic).
+                    object updatesObj = result.Updates;
+                    List<ProgramInfo> mapped = MapUpdates(updatesObj, softwareOnly, !softwareOnly, progress, ct);
+
+                    // For broad search without Type=, filter by type
+                    if (!criteria.Contains("Type=", StringComparison.Ordinal) &&
+                        !criteria.Contains("CategoryIDs", StringComparison.Ordinal))
+                    {
+                        mapped = mapped.Where(p => softwareOnly
+                            ? p.Source == PackageSource.WindowsUpdate
+                            : p.Source == PackageSource.Driver).ToList();
+                    }
+
+                    foreach (var item in mapped)
+                    {
+                        if (seenIds.Add(item.PackageId))
+                            list.Add(item);
+                    }
+
+                    // If we already have security hits, still continue to collect remaining software
+                    // unless SecurityUpdatesOnly and we only wanted category hits — still collect all
+                    // software then filter later in CVE pass.
+                    if (list.Count > 0 && criteria.Contains("CategoryIDs", StringComparison.Ordinal))
+                        continue;
+
+                    if (list.Count > 0 && criteria.Contains("Type='Software'", StringComparison.Ordinal))
                         break;
-                    // Broad search: keep only matching type
-                    list = list.Where(p => softwareOnly
-                        ? p.Source == PackageSource.WindowsUpdate
-                        : p.Source == PackageSource.Driver).ToList();
-                    break;
+
+                    if (list.Count > 0 && !softwareOnly)
+                        break;
                 }
                 catch (Exception ex)
                 {
@@ -113,12 +249,21 @@ public sealed class WindowsUpdateService
             if (list.Count == 0 && lastError is not null)
                 _log.Warn($"Windows Update returned no results. Last error: {lastError.Message}");
 
+            if (_config.Config.WindowsUpdate.PrioritizeSecurity && softwareOnly)
+            {
+                list = list
+                    .OrderBy(p => p.SeverityRank)
+                    .ThenByDescending(p => p.IsSecurityUpdate)
+                    .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+
             progress?.Report(new ScanProgress
             {
                 Message = list.Count == 0
                     ? $"No {label} available"
                     : $"Found {list.Count} {label}",
-                Percent = 100
+                Percent = softwareOnly && _config.Config.WindowsUpdate.CveScanEnabled ? 50 : 100
             });
             _log.Info($"{label}: {list.Count} pending update(s).");
             return list;
@@ -135,6 +280,18 @@ public sealed class WindowsUpdateService
             progress?.Report(new ScanProgress { Message = "Windows Update search failed", Percent = 100 });
             return [];
         }
+    }
+
+    private List<string> BuildSoftwareCriteria()
+    {
+        // Security Updates category, Critical Updates, then all software.
+        return
+        [
+            $"IsInstalled=0 and IsHidden=0 and CategoryIDs contains '{CategorySecurityUpdates}'",
+            $"IsInstalled=0 and IsHidden=0 and CategoryIDs contains '{CategoryCriticalUpdates}'",
+            "IsInstalled=0 and IsHidden=0 and Type='Software'",
+            "IsInstalled=0 and IsHidden=0"
+        ];
     }
 
     private IReadOnlyList<ProgramInfo> QueryHistory(
@@ -167,26 +324,22 @@ public sealed class WindowsUpdateService
                 return [];
             }
 
-            // Most recent first — QueryHistory(startIndex, count)
             var take = Math.Min(total, 300);
             var start = Math.Max(0, total - take);
             dynamic history = searcher.QueryHistory(start, take);
             var count = (int)history.Count;
             var list = new List<ProgramInfo>();
 
-            // Iterate newest → oldest
             for (var i = count - 1; i >= 0; i--)
             {
                 ct.ThrowIfCancellationRequested();
                 dynamic h = history.Item(i);
 
-                // Operation: 1 = Installation, 2 = Uninstallation
                 int operation = 0;
                 try { operation = (int)h.Operation; } catch { /* ignore */ }
                 if (operation != 1)
                     continue;
 
-                // ResultCode: 2 = Succeeded, 3 = SucceededWithErrors
                 int resultCode = 0;
                 try { resultCode = (int)h.ResultCode; } catch { /* ignore */ }
                 if (resultCode is not (2 or 3))
@@ -197,7 +350,6 @@ public sealed class WindowsUpdateService
                                    title.Contains("Device ", StringComparison.OrdinalIgnoreCase);
                 try
                 {
-                    // Some history entries expose Categories
                     if (h.Categories != null)
                     {
                         for (var c = 0; c < (int)h.Categories.Count; c++)
@@ -219,17 +371,21 @@ public sealed class WindowsUpdateService
                 string kb = "";
                 try
                 {
-                    // Title often contains (KBnnnnnn)
-                    var m = System.Text.RegularExpressions.Regex.Match(title, @"KB\d+", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                    if (m.Success) kb = m.Value.ToUpperInvariant();
+                    var m = KbRegex.Match(title);
+                    if (m.Success)
+                        kb = m.Value.ToUpperInvariant();
                 }
                 catch { /* ignore */ }
 
+                var cves = ExtractCves(title);
                 DateTime? when = null;
                 try { when = (DateTime)h.Date; } catch { /* ignore */ }
 
                 string id = "";
                 try { id = (string)h.UpdateIdentity.UpdateID; } catch { /* ignore */ }
+
+                var isSecurity = title.Contains("Security", StringComparison.OrdinalIgnoreCase) ||
+                                 cves.Count > 0;
 
                 list.Add(new ProgramInfo
                 {
@@ -240,10 +396,12 @@ public sealed class WindowsUpdateService
                     Publisher = "Microsoft",
                     PackageId = string.IsNullOrWhiteSpace(id) ? title : id,
                     KbId = kb,
+                    CveIds = cves.Count > 0 ? string.Join(", ", cves) : null,
+                    IsSecurityUpdate = isSecurity,
                     Source = driversOnly ? PackageSource.Driver : PackageSource.WindowsUpdate,
                     Category = driversOnly ? UpdateCategory.Drivers : UpdateCategory.WindowsUpdates,
                     LastUpdated = when,
-                    Notes = "Installed (history)"
+                    Notes = isSecurity ? "Installed (history · security)" : "Installed (history)"
                 });
 
                 if (list.Count >= 150)
@@ -271,34 +429,34 @@ public sealed class WindowsUpdateService
     }
 
     private List<ProgramInfo> MapUpdates(
-        dynamic updates,
+        object updatesObj,
         bool preferSoftware,
         bool driversOnly,
         IProgress<ScanProgress>? progress,
         CancellationToken ct)
     {
+        dynamic updates = updatesObj;
         var list = new List<ProgramInfo>();
         var count = (int)updates.Count;
 
         for (var i = 0; i < count; i++)
         {
             ct.ThrowIfCancellationRequested();
-            dynamic u = updates.Item(i);
+            object updateItem = updates.Item(i);
+            dynamic u = updateItem;
 
-            bool isDriver = IsDriverUpdate(u);
+            bool isDriver = IsDriverUpdate(updateItem);
             if (driversOnly && !isDriver)
                 continue;
             if (!driversOnly && preferSoftware && isDriver)
                 continue;
 
             string title = Safe(() => (string)u.Title) ?? "Windows Update";
-            string kb = "";
-            try
-            {
-                if (u.KBArticleIDs != null && (int)u.KBArticleIDs.Count > 0)
-                    kb = "KB" + u.KBArticleIDs.Item(0);
-            }
-            catch { /* ignore */ }
+            string description = Safe(() => (string)u.Description) ?? "";
+
+            var kbs = ExtractKbIdsFromUpdate(updateItem, title, description);
+            var kbPrimary = kbs.Count > 0 ? kbs[0] : "";
+            var kbField = kbs.Count > 0 ? string.Join(", ", kbs) : "";
 
             string identity = Safe(() => (string)u.Identity.UpdateID) ?? title;
             DateTime? last = null;
@@ -307,38 +465,278 @@ public sealed class WindowsUpdateService
             string severity = "";
             try { severity = ((object)u.MsrcSeverity)?.ToString() ?? ""; } catch { /* ignore */ }
 
+            var classified = ClassifyUpdate(updateItem, title, description, severity);
+            bool isSecurity = classified.IsSecurity;
+            string classification = classified.Classification;
+            var cves = ExtractCves(title + "\n" + description);
+
+            // Security bulletins sometimes embed CVE-like info in more fields
+            try
+            {
+                dynamic du = updateItem;
+                if (du.SecurityBulletinIDs != null)
+                {
+                    for (var b = 0; b < (int)du.SecurityBulletinIDs.Count; b++)
+                    {
+                        string? bulletin = null;
+                        try { bulletin = (string)du.SecurityBulletinIDs.Item(b); } catch { /* ignore */ }
+                        if (!string.IsNullOrWhiteSpace(bulletin))
+                            cves.AddRange(ExtractCves(bulletin));
+                    }
+                }
+            }
+            catch { /* ignore */ }
+
+            cves = cves
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(c => c, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (string.IsNullOrWhiteSpace(severity) && isSecurity)
+                severity = "Important";
+
+            var rank = MsrcCveService.SeverityRank(severity);
+            if (!isSecurity && rank >= 40)
+                rank = 50;
+
+            var available = !string.IsNullOrWhiteSpace(kbPrimary)
+                ? kbPrimary
+                : (!string.IsNullOrWhiteSpace(severity) ? severity : "Pending");
+            if (!string.IsNullOrWhiteSpace(severity) && !string.IsNullOrWhiteSpace(kbPrimary))
+                available = $"{kbPrimary} · {severity}";
+
+            var notesParts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(classification))
+                notesParts.Add(classification);
+            if (cves.Count > 0)
+                notesParts.Add(string.Join(", ", cves.Take(6)) + (cves.Count > 6 ? $" (+{cves.Count - 6})" : ""));
+            if (!string.IsNullOrWhiteSpace(description))
+            {
+                var shortDesc = description.Length > 240 ? description[..240] + "…" : description;
+                notesParts.Add(shortDesc);
+            }
+
             list.Add(new ProgramInfo
             {
                 Name = title,
-                Version = "—",
-                AvailableVersion = !string.IsNullOrWhiteSpace(kb) ? kb
-                    : (!string.IsNullOrWhiteSpace(severity) ? severity : "Pending"),
+                Version = isSecurity ? (severity is { Length: > 0 } ? severity : "Security") : "—",
+                AvailableVersion = available,
                 UpdateAvailable = true,
                 Publisher = "Microsoft",
                 PackageId = identity,
-                KbId = kb,
+                KbId = kbField,
                 Source = isDriver ? PackageSource.Driver : PackageSource.WindowsUpdate,
                 Category = isDriver ? UpdateCategory.Drivers : UpdateCategory.WindowsUpdates,
                 LastUpdated = last,
-                Notes = Safe(() => (string)u.Description)
+                Notes = string.Join(" · ", notesParts),
+                Severity = string.IsNullOrWhiteSpace(severity) ? null : severity,
+                SeverityRank = rank,
+                CveIds = cves.Count > 0 ? string.Join(", ", cves) : null,
+                IsSecurityUpdate = isSecurity,
+                Classification = classification,
+                Origin = isSecurity ? "Security Update" : (isDriver ? "Driver" : "Windows Update")
             });
 
-            var pct = count == 0 ? 100 : (int)((i + 1) * 90.0 / count) + 5;
+            var pct = count == 0 ? 45 : (int)((i + 1) * 40.0 / count) + 10;
             progress?.Report(new ScanProgress
             {
                 Message = title,
-                Percent = Math.Clamp(pct, 5, 95)
+                Percent = Math.Clamp(pct, 10, 50)
             });
         }
 
         return list;
     }
 
-    private static bool IsDriverUpdate(dynamic u)
+    private readonly record struct UpdateClassification(bool IsSecurity, string Classification);
+
+    private static UpdateClassification ClassifyUpdate(
+        object updateObj,
+        string title,
+        string description,
+        string severity)
     {
+        dynamic u = updateObj;
+        var names = new List<string>();
         try
         {
-            // IUpdate.Type: utSoftware = 1, utDriver = 2
+            if (u.Categories != null)
+            {
+                for (var c = 0; c < (int)u.Categories.Count; c++)
+                {
+                    string name = "";
+                    string id = "";
+                    try { name = (string)u.Categories.Item(c).Name ?? ""; } catch { /* ignore */ }
+                    try { id = (string)u.Categories.Item(c).CategoryID ?? ""; } catch { /* ignore */ }
+                    if (!string.IsNullOrWhiteSpace(name))
+                        names.Add(name);
+
+                    if (id.Equals(CategorySecurityUpdates, StringComparison.OrdinalIgnoreCase) ||
+                        name.Contains("Security Update", StringComparison.OrdinalIgnoreCase))
+                        return new UpdateClassification(true, "Security Updates");
+
+                    if (id.Equals(CategoryCriticalUpdates, StringComparison.OrdinalIgnoreCase) ||
+                        name.Equals("Critical Updates", StringComparison.OrdinalIgnoreCase))
+                        return new UpdateClassification(true, "Critical Updates");
+                }
+            }
+        }
+        catch { /* ignore */ }
+
+        if (!string.IsNullOrWhiteSpace(severity))
+            return new UpdateClassification(true, names.FirstOrDefault() ?? "Security Updates");
+
+        var blob = title + "\n" + description;
+        if (blob.Contains("Security Update", StringComparison.OrdinalIgnoreCase) ||
+            blob.Contains("Security Only", StringComparison.OrdinalIgnoreCase) ||
+            CveRegex.IsMatch(blob))
+            return new UpdateClassification(
+                true,
+                names.FirstOrDefault(n => n.Contains("Security", StringComparison.OrdinalIgnoreCase))
+                ?? "Security Updates");
+
+        if (title.Contains("Cumulative Update", StringComparison.OrdinalIgnoreCase))
+            return new UpdateClassification(true, "Cumulative Update"); // monthly LCU includes security
+
+        return new UpdateClassification(false, names.FirstOrDefault() ?? "");
+    }
+
+    private static List<string> ExtractKbIdsFromUpdate(object updateObj, string title, string description)
+    {
+        dynamic u = updateObj;
+        var kbs = new List<string>();
+        try
+        {
+            if (u.KBArticleIDs != null)
+            {
+                for (var k = 0; k < (int)u.KBArticleIDs.Count; k++)
+                {
+                    string raw = "";
+                    try
+                    {
+                        object? item = u.KBArticleIDs.Item(k);
+                        raw = item?.ToString() ?? "";
+                    }
+                    catch { /* ignore */ }
+
+                    if (string.IsNullOrWhiteSpace(raw))
+                        continue;
+                    var kb = raw.StartsWith("KB", StringComparison.OrdinalIgnoreCase)
+                        ? raw.ToUpperInvariant()
+                        : "KB" + raw.Trim();
+                    if (!kbs.Contains(kb, StringComparer.OrdinalIgnoreCase))
+                        kbs.Add(kb);
+                }
+            }
+        }
+        catch { /* ignore */ }
+
+        foreach (Match m in KbRegex.Matches(title + " " + description))
+        {
+            var kb = m.Value.ToUpperInvariant();
+            if (!kbs.Contains(kb, StringComparer.OrdinalIgnoreCase))
+                kbs.Add(kb);
+        }
+
+        return kbs;
+    }
+
+    private static List<string> ExtractCves(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return [];
+        return CveRegex.Matches(text)
+            .Select(m => m.Value.ToUpperInvariant())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static HashSet<string> ExtractKbNumbers(string? kbField)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(kbField))
+            return set;
+        foreach (Match m in Regex.Matches(kbField, @"\d{6,7}"))
+            set.Add(m.Value);
+        return set;
+    }
+
+    /// <summary>
+    /// Collects installed KBs from WMI QuickFixEngineering and Windows Update history.
+    /// Keys are stored both as bare numbers and KB-prefixed forms.
+    /// </summary>
+    private HashSet<string> GetInstalledKbSet(CancellationToken ct)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            using var searcher = new System.Management.ManagementObjectSearcher(
+                "SELECT HotFixID FROM Win32_QuickFixEngineering");
+            foreach (var obj in searcher.Get())
+            {
+                ct.ThrowIfCancellationRequested();
+                var id = obj["HotFixID"]?.ToString();
+                if (string.IsNullOrWhiteSpace(id))
+                    continue;
+                set.Add(id);
+                var n = MsrcCveService.NormalizeKb(id);
+                if (!string.IsNullOrWhiteSpace(n))
+                {
+                    set.Add(n);
+                    set.Add("KB" + n);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Warn($"WMI QuickFixEngineering scan failed: {ex.Message}");
+        }
+
+        try
+        {
+            dynamic session = CreateSession();
+            dynamic searcher = session.CreateUpdateSearcher();
+            int total = 0;
+            try { total = (int)searcher.GetTotalHistoryCount(); } catch { /* ignore */ }
+            if (total > 0)
+            {
+                var take = Math.Min(total, 500);
+                var start = Math.Max(0, total - take);
+                dynamic history = searcher.QueryHistory(start, take);
+                var count = (int)history.Count;
+                for (var i = 0; i < count; i++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    dynamic h = history.Item(i);
+                    int resultCode = 0;
+                    try { resultCode = (int)h.ResultCode; } catch { /* ignore */ }
+                    if (resultCode is not (2 or 3))
+                        continue;
+
+                    string title = Safe(() => (string)h.Title) ?? "";
+                    foreach (Match m in KbRegex.Matches(title))
+                    {
+                        var kb = m.Value.ToUpperInvariant();
+                        set.Add(kb);
+                        set.Add(MsrcCveService.NormalizeKb(kb));
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Warn($"WU history KB inventory failed: {ex.Message}");
+        }
+
+        return set;
+    }
+
+    private static bool IsDriverUpdate(object updateObj)
+    {
+        dynamic u = updateObj;
+        try
+        {
             var t = u.Type;
             if (t is int ti)
                 return ti == 2;
@@ -361,9 +759,8 @@ public sealed class WindowsUpdateService
                 {
                     string name = Safe(() => (string)u.Categories.Item(c).Name) ?? "";
                     string id = Safe(() => (string)u.Categories.Item(c).CategoryID) ?? "";
-                    // Drivers category GUID
                     if (name.Contains("Driver", StringComparison.OrdinalIgnoreCase) ||
-                        id.Equals("780016B9-ABC3-4B5E-8A62-5A1B0B0E0E0E", StringComparison.OrdinalIgnoreCase) ||
+                        id.Equals(CategoryDrivers, StringComparison.OrdinalIgnoreCase) ||
                         id.Equals("5C9376AB-8CE6-464A-B136-22113DD69801", StringComparison.OrdinalIgnoreCase))
                         return true;
                 }
@@ -392,6 +789,7 @@ public sealed class WindowsUpdateService
         var start = DateTime.Now;
         var result = new UpdateResult { Program = program, StartTime = start };
 
+        // MSRC gap rows are not always in the current WU catalog — try to match by KB.
         try
         {
             progress?.Report(new UpdateProgress
@@ -412,21 +810,53 @@ public sealed class WindowsUpdateService
             dynamic searchResult = searcher.Search("IsInstalled=0 and IsHidden=0");
             dynamic found = null!;
             var matched = false;
+            var targetKbs = ExtractKbNumbers(program.KbId);
+
             for (var i = 0; i < (int)searchResult.Updates.Count; i++)
             {
                 dynamic u = searchResult.Updates.Item(i);
                 string id = Safe(() => (string)u.Identity.UpdateID) ?? "";
+                string title = Safe(() => (string)u.Title) ?? "";
+
                 if (string.Equals(id, program.PackageId, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals((string)u.Title, program.Name, StringComparison.OrdinalIgnoreCase))
+                    string.Equals(title, program.Name, StringComparison.OrdinalIgnoreCase))
                 {
                     found = u;
                     matched = true;
                     break;
                 }
+
+                if (targetKbs.Count > 0)
+                {
+                    string desc = "";
+                    try { desc = (string)u.Description ?? ""; } catch { /* ignore */ }
+                    object updateObj = u;
+                    var updateKbs = ExtractKbIdsFromUpdate(updateObj, title, desc);
+                    var updateNums = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var kb in updateKbs)
+                    {
+                        foreach (var n in ExtractKbNumbers(kb))
+                            updateNums.Add(n);
+                    }
+
+                    if (targetKbs.Any(n => updateNums.Contains(n)))
+                    {
+                        found = u;
+                        matched = true;
+                        break;
+                    }
+                }
             }
 
             if (!matched)
+            {
+                if (program.PackageId.StartsWith("msrc:", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException(
+                        "This security KB is not currently offered by Windows Update on this PC " +
+                        "(may be superseded, not applicable, or not yet published to WU). " +
+                        "Open the support link from Notes/DownloadUrl or run Windows Update later.");
                 throw new InvalidOperationException("Update no longer available from Windows Update.");
+            }
 
             dynamic toDownload = Activator.CreateInstance(Type.GetTypeFromProgID("Microsoft.Update.UpdateColl")!)!;
             toDownload.Add(found);

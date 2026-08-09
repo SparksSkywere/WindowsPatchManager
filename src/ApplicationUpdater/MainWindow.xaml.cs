@@ -116,14 +116,19 @@ public partial class MainWindow : Window
         if (e.OriginalSource is not GridViewColumnHeader header)
             return;
 
-        // Ignore the padding header / empty select column
+        // Ignore select-all checkbox column and non-text headers
+        if (header.Column?.Header is CheckBox || e.OriginalSource is CheckBox)
+            return;
+
         var rawHeader = header.Column?.Header?.ToString()
                         ?? (header.Content as TextBlock)?.Text
                         ?? header.Content?.ToString()
                         ?? string.Empty;
         var headerText = rawHeader.Replace(" ▲", string.Empty).Replace(" ▼", string.Empty).Trim();
 
-        if (string.IsNullOrWhiteSpace(headerText) || !HeaderToProperty.TryGetValue(headerText, out var property))
+        if (string.IsNullOrWhiteSpace(headerText) ||
+            headerText.Contains("System.Windows.Controls.CheckBox", StringComparison.Ordinal) ||
+            !HeaderToProperty.TryGetValue(headerText, out var property))
             return;
 
         if (DataContext is not MainViewModel vm)
