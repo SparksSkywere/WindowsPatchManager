@@ -9,6 +9,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.3.1] — 2026-08-09
+
+### Added
+- **Application self-update on startup**: checks GitHub Releases **before** scanning packages, prompts Yes/No, and on Yes downloads the installer, launches it elevated, then closes the app.
+- **Help → Check for application update…** for a manual self-update check.
+- Prefer **WindowsPatchManager-Setup.exe** (Burn) assets, then MSI, for self-update downloads.
+
+### Fixed
+- Self-update used the wrong version source and never prompted the user on launch (only appeared as a silent GitHub list row).
+- Installer launch now requests elevation and does not wait while files are locked by the running process.
+
+---
+
 ## [2.3.0] — 2026-08-09
 
 ### Added
@@ -152,6 +165,7 @@ Previous Python-based Patch Manager (GUI + winget/Chocolatey helpers). Supersede
 
 ---
 
+[2.3.1]: https://github.com/SparksSkywere/WindowsPatchManager/releases/tag/v2.3.1
 [2.3.0]: https://github.com/SparksSkywere/WindowsPatchManager/releases/tag/v2.3.0
 [2.1.14]: https://github.com/SparksSkywere/WindowsPatchManager/releases/tag/v2.1.14
 [2.1.10]: https://github.com/SparksSkywere/WindowsPatchManager/releases/tag/v2.1.10

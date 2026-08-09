@@ -194,15 +194,177 @@ public partial class MainViewModel : ObservableObject
     private async Task LoadedAsync()
     {
         ShowUpdatesOnly = _patchManager.Config.Config.General.ShowOnlyUpdatable;
-        _log.Info("Windows Patch Manager started.");
-        // Initial scan populates Applications, Drivers, and Windows Update together.
+        _log.Info($"Windows Patch Manager {AppInfo.Version} started.");
+
+        // 1) Application self-update first (prompt; if accepted, install and exit).
+        var restartingForUpdate = await CheckAndPromptSelfUpdateAsync().ConfigureAwait(true);
+        if (restartingForUpdate)
+            return;
+
+        // 2) Initial scan populates Applications, Drivers, and Windows Update together.
         await ScanAllUpdateTabsAsync().ConfigureAwait(true);
         if (_patchManager.Config.Config.General.AutoCheckUpdates)
             await CheckUpdatesAsync().ConfigureAwait(true);
     }
 
     /// <summary>
-    /// Scans applications + drivers + Windows Update (used on launch and from Applications Scan).
+    /// Checks GitHub for a newer app build. Prompts the user; on Yes downloads and
+    /// launches the installer then shuts down. Returns true if the app is exiting for update.
+    /// </summary>
+    private async Task<bool> CheckAndPromptSelfUpdateAsync()
+    {
+        if (!_patchManager.Config.Config.GitHub.SelfUpdate.Enabled)
+        {
+            _log.Info("Self-update skipped (disabled in Options).");
+            return false;
+        }
+
+        ProgramInfo? update = null;
+        try
+        {
+            StatusText = "Checking for application updates…";
+            await RunBusyAsync("Checking for application updates…", async (ct, progress) =>
+            {
+                update = await _patchManager.CheckSelfUpdateAsync(progress, ct).ConfigureAwait(false);
+            }).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            _log.Warn($"Self-update check error: {ex.Message}");
+            StatusText = "Ready";
+            return false;
+        }
+
+        if (update is null || !update.UpdateAvailable || string.IsNullOrWhiteSpace(update.DownloadUrl))
+        {
+            StatusText = "Ready";
+            return false;
+        }
+
+        var assetNote = string.IsNullOrWhiteSpace(update.Notes) ? "" : $"\nPackage: {update.Notes}";
+        var answer = MessageBox.Show(
+            $"A new version of {AppInfo.ProductName} is available.\n\n" +
+            $"Current version:  {AppInfo.Version}\n" +
+            $"Available version: {update.AvailableVersion}{assetNote}\n\n" +
+            "Do you want to download and install the update now?\n\n" +
+            "The application will close so the installer can replace files.",
+            "Update available",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Information,
+            MessageBoxResult.Yes);
+
+        if (answer != MessageBoxResult.Yes)
+        {
+            _log.Info($"Self-update to {update.AvailableVersion} declined by user.");
+            StatusText = $"Update {update.AvailableVersion} available (skipped)";
+            return false;
+        }
+
+        UpdateResult? result = null;
+        try
+        {
+            await RunBusyAsync($"Downloading {AppInfo.ProductName} {update.AvailableVersion}…", async (ct, progress) =>
+            {
+                // Map UpdateProgress → busy overlay
+                var mapped = new Progress<UpdateProgress>(p =>
+                {
+                    UiThread.Post(() =>
+                    {
+                        if (p.ItemPercent >= 0)
+                        {
+                            IsProgressIndeterminate = false;
+                            ProgressValue = p.ItemPercent;
+                            ProgressPercentText = $"{p.ItemPercent}%";
+                        }
+                        if (!string.IsNullOrWhiteSpace(p.Message))
+                            BusyOverlayText = p.Message;
+                    });
+                });
+                result = await _patchManager.InstallSelfUpdateAsync(update, mapped, ct).ConfigureAwait(false);
+            }).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"Self-update download/install failed: {ex.Message}");
+            MessageBox.Show(
+                $"Could not install the update:\n\n{ex.Message}",
+                "Update failed",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            StatusText = "Update failed";
+            return false;
+        }
+
+        if (result is null || !result.Success)
+        {
+            var err = result?.ErrorMessage ?? "Unknown error";
+            MessageBox.Show(
+                $"Could not install the update:\n\n{err}",
+                "Update failed",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            StatusText = "Update failed";
+            return false;
+        }
+
+        MessageBox.Show(
+            "The installer has started.\n\n" +
+            "Windows Patch Manager will close now so the update can finish.\n" +
+            "Re-open the app after installation completes.",
+            "Installing update",
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
+
+        _log.Info("Shutting down for self-update installer.");
+        Application.Current.Shutdown(0);
+        return true;
+    }
+
+    /// <summary>Manual: Help → Check for application update…</summary>
+    [RelayCommand(CanExecute = nameof(CanRun))]
+    private async Task CheckAppUpdateAsync()
+    {
+        // Temporarily force-enabled check even if auto-check is off; still respects SelfUpdate.Enabled.
+        if (!_patchManager.Config.Config.GitHub.SelfUpdate.Enabled)
+        {
+            MessageBox.Show(
+                "Application self-update is disabled in Options.\n\n" +
+                "Enable “Check GitHub for Windows Patch Manager self-update” under Options → General.",
+                "Self-update disabled",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        var restarting = await CheckAndPromptSelfUpdateAsync().ConfigureAwait(true);
+        if (restarting)
+            return;
+
+        // If no update (or user declined), surface a clear message when nothing was available
+        if (StatusText.Contains("skipped", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        // Re-check to distinguish "up to date" vs failed
+        ProgramInfo? latest = null;
+        try
+        {
+            latest = await _patchManager.CheckSelfUpdateAsync().ConfigureAwait(true);
+        }
+        catch { /* already logged */ }
+
+        if (latest is null || !latest.UpdateAvailable)
+        {
+            MessageBox.Show(
+                $"{AppInfo.ProductName} is up to date.\n\nCurrent version: {AppInfo.Version}",
+                "No update available",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            StatusText = $"Up to date ({AppInfo.Version})";
+        }
+    }
+
+    /// <summary>
+    /// Scans applications + drivers & Windows Update (used on launch and from Applications Scan).
     /// </summary>
     private async Task ScanAllUpdateTabsAsync()
     {
@@ -854,6 +1016,7 @@ public partial class MainViewModel : ObservableObject
     {
         ScanCommand.NotifyCanExecuteChanged();
         CheckUpdatesCommand.NotifyCanExecuteChanged();
+        CheckAppUpdateCommand.NotifyCanExecuteChanged();
         UpdateSelectedCommand.NotifyCanExecuteChanged();
         UpdateAllCommand.NotifyCanExecuteChanged();
         ShowUpdateHistoryCommand.NotifyCanExecuteChanged();

@@ -18,9 +18,9 @@
     <Authors>Skywere Industries</Authors>
     <Copyright>Copyright © Skywere Industries</Copyright>
     <Description>Manage software updates on Windows using winget, Microsoft Store, Chocolatey, WSL, Office, Windows Update, and CVE/KB security scanning.</Description>
-    <Version>2.3.0</Version>
-    <FileVersion>2.3.0</FileVersion>
-    <AssemblyVersion>2.3.0.0</AssemblyVersion>
+    <Version>2.3.1</Version>
+    <FileVersion>2.3.1</FileVersion>
+    <AssemblyVersion>2.3.1.0</AssemblyVersion>
     <NeutralLanguage>en-US</NeutralLanguage>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>

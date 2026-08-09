@@ -47,6 +47,20 @@ public sealed class PatchManagerService
 
     public ConfigService Config => _config;
     public LogService Log => _log;
+    public GitHubUpdateService GitHub => _github;
+
+    /// <summary>Check GitHub Releases for a newer version of this application.</summary>
+    public Task<ProgramInfo?> CheckSelfUpdateAsync(
+        IProgress<ScanProgress>? progress = null,
+        CancellationToken ct = default)
+        => _github.CheckSelfUpdateAsync(progress, ct);
+
+    /// <summary>Download and launch the self-update installer (host should exit after success).</summary>
+    public Task<UpdateResult> InstallSelfUpdateAsync(
+        ProgramInfo program,
+        IProgress<UpdateProgress>? progress = null,
+        CancellationToken ct = default)
+        => _github.InstallSelfUpdateAsync(program, progress, ct);
 
     public async Task<IReadOnlyList<ProgramInfo>> ScanAsync(
         IProgress<ScanProgress>? progress = null,
