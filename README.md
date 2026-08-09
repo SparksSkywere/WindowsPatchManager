@@ -55,6 +55,17 @@ myorg/chronolog|Chronolog|Setup
 
 Optional PAT for rate limits / private repos. Enable **self-update** with `owner/repo` for this app when hosted on GitHub.
 
+### Application self-update
+On launch (when **Options → Check GitHub for Windows Patch Manager self-update** is on), the app:
+
+1. Checks GitHub Releases for a newer version **before** scanning packages  
+2. Prompts **Yes / No** if an update is available  
+3. On **Yes** — downloads Setup/MSI, starts the installer (UAC), then exits  
+4. On **No** — continues with the normal scan  
+
+Also available under **Help → Check for application update…**.  
+Requires a published GitHub Release with `WindowsPatchManager-Setup.exe` or `.msi` assets.
+
 ### Extra update sources (Options → Update sources)
 | Source | How it works |
 |--------|----------------|
