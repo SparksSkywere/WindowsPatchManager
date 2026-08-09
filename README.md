@@ -22,7 +22,7 @@ powershell -ExecutionPolicy Bypass -File .\build-installer.ps1
 | File | Notes |
 |------|--------|
 | `dist\WindowsPatchManager.msi` | Full Windows Installer wizard (Welcome → License → **features** — optional **Desktop shortcut**, install folder → Install) |
-| `dist\WindowsPatchManager-Setup.exe` | WiX Burn setup; use **Options** to set the install folder |
+| `dist\WindowsPatchManager-Setup.exe` | WiX Burn setup that launches the same MSI wizard (install folder + **Desktop shortcut** feature, Start Menu shortcuts) |
 
 ```text
 msiexec /i WindowsPatchManager.msi

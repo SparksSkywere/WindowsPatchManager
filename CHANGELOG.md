@@ -9,6 +9,14 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.3.2] — 2026-08-09
+
+### Fixed
+- Installer error **“could not access network location [ProgramFiles64]WindowsPatchManager”**: Burn `InstallFolder` was a raw `string`, so `[ProgramFiles64Folder]` was never expanded. Now uses a **formatted** path (and the Setup chain shows the MSI UI for the real install folder).
+- **Setup.exe** no longer hides feature options: the MSI **FeatureTree** wizard is shown (`DisplayInternalUI`), including **Desktop shortcut** and install folder, plus Start Menu shortcuts on the main feature.
+
+---
+
 ## [2.3.1] — 2026-08-09
 
 ### Added
@@ -165,6 +173,7 @@ Previous Python-based Patch Manager (GUI + winget/Chocolatey helpers). Supersede
 
 ---
 
+[2.3.2]: https://github.com/SparksSkywere/WindowsPatchManager/releases/tag/v2.3.2
 [2.3.1]: https://github.com/SparksSkywere/WindowsPatchManager/releases/tag/v2.3.1
 [2.3.0]: https://github.com/SparksSkywere/WindowsPatchManager/releases/tag/v2.3.0
 [2.1.14]: https://github.com/SparksSkywere/WindowsPatchManager/releases/tag/v2.1.14
