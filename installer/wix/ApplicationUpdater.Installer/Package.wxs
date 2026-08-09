@@ -1,0 +1,188 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Windows Installer package (MSI) for Windows Patch Manager.
+  Feature tree UI: browse install folder + optional Desktop shortcut (off by default).
+
+  Upgrade / uninstall:
+  - Stable UpgradeCode + MajorUpgrade removes previous installs (including same version rebuilds).
+  - CloseApplication stops a running instance so files are not locked.
+  - Install folder path is written to the registry; RemoveFolderEx cleans orphans on uninstall/upgrade.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <Package Name="Windows Patch Manager"
+           Language="1033"
+           Version="2.3.2"
+           Manufacturer="Skywere Industries"
+           UpgradeCode="A1B2C3D4-E5F6-4789-A012-3456789ABCDE"
+           Scope="perMachine"
+           InstallerVersion="500">
+
+    <SummaryInformation Description="Manage software updates on Windows (winget, Store, WSL, Office, Windows Update / CVE)."
+                        Manufacturer="Skywere Industries" />
+
+    <!--
+      Remove previous product BEFORE installing new files.
+      AllowSameVersionUpgrades: reinstalling a rebuild of the same version (new ProductCode)
+      replaces the old registration instead of stacking ARP entries.
+    -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed. Uninstall it first if you need to roll back."
+                  AllowSameVersionUpgrades="yes"
+                  Schedule="afterInstallInitialize" />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- Production icon: repo assets\installer.ico (EXE + ARP + shortcuts) -->
+    <Icon Id="AppIcon" SourceFile="..\..\..\assets\installer.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <!-- Standard ARP Modify/Uninstall (no separate Modify button clutter) -->
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+
+    <!-- Remember install directory for cleanup on uninstall/upgrade (orphaned harvest files) -->
+    <Property Id="WPM_INSTALL_DIR">
+      <RegistrySearch Id="FindWpmInstallDir"
+                      Root="HKLM"
+                      Key="Software\Skywere Industries\WindowsPatchManager"
+                      Name="InstallDir"
+                      Type="raw" />
+    </Property>
+
+    <!-- Close running app so upgrade/uninstall can replace/delete the EXE -->
+    <util:CloseApplication Id="CloseWindowsPatchManager"
+                           Target="WindowsPatchManager.exe"
+                           CloseMessage="yes"
+                           ElevatedCloseMessage="yes"
+                           RebootPrompt="no"
+                           TerminateProcess="2000"
+                           PromptToContinue="no" />
+
+    <!-- Feature tree: required app files + optional desktop shortcut (Level 2 = off by default). -->
+    <ui:WixUI Id="WixUI_FeatureTree" />
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+
+    <Feature Id="ProductFeature"
+             Title="Windows Patch Manager"
+             Description="Program files and Start Menu shortcuts"
+             Level="1"
+             ConfigurableDirectory="INSTALLFOLDER"
+             AllowAbsent="no"
+             Display="expand">
+      <ComponentGroupRef Id="ProductComponents" />
+      <ComponentRef Id="AppRegistration" />
+      <ComponentRef Id="AppShortcuts" />
+
+      <!-- Level 2 > default INSTALLLEVEL (1) → not installed unless the user checks it on the Features page -->
+      <Feature Id="DesktopShortcutFeature"
+               Title="Desktop shortcut"
+               Description="Create a Windows Patch Manager shortcut on the Desktop"
+               Level="2"
+               AllowAbsent="yes">
+        <ComponentRef Id="DesktopShortcutComponent" />
+      </Feature>
+    </Feature>
+
+    <!--
+      Default install root: C:\Program Files\WindowsPatchManager
+      WixUI_FeatureTree + WIXUI_INSTALLDIR let the user change INSTALLFOLDER.
+      Do not set INSTALLFOLDER to a Burn string that still contains [ProgramFiles64Folder]
+      brackets — that produces "could not access network location [ProgramFiles64]…".
+    -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="WindowsPatchManager" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppProgramMenuFolder" Name="Windows Patch Manager" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder" />
+
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+      <Files Include="!(bindpath.Payload)\**">
+        <Exclude Files="!(bindpath.Payload)\**\*.pdb" />
+      </Files>
+    </ComponentGroup>
+
+    <!-- Product registration: install path + ARP helpers (stable GUID) -->
+    <Component Id="AppRegistration"
+               Directory="INSTALLFOLDER"
+               Guid="A1B2C3D4-E5F6-4789-A012-3456789AB001"
+               Bitness="always64">
+      <RegistryValue Root="HKLM"
+                     Key="Software\Skywere Industries\WindowsPatchManager"
+                     Name="InstallDir"
+                     Type="string"
+                     Value="[INSTALLFOLDER]"
+                     KeyPath="yes" />
+      <RegistryValue Root="HKLM"
+                     Key="Software\Skywere Industries\WindowsPatchManager"
+                     Name="Installed"
+                     Type="integer"
+                     Value="1" />
+      <RegistryValue Root="HKLM"
+                     Key="Software\Skywere Industries\WindowsPatchManager"
+                     Name="Version"
+                     Type="string"
+                     Value="[ProductVersion]" />
+      <!-- Wipe install folder on uninstall (orphans from harvested files / major upgrade) -->
+      <util:RemoveFolderEx Id="RemoveInstallFolderEx"
+                           Property="WPM_INSTALL_DIR"
+                           On="uninstall" />
+      <RemoveFolder Id="RemoveInstallFolder" Directory="INSTALLFOLDER" On="uninstall" />
+    </Component>
+
+    <Component Id="AppShortcuts"
+               Directory="INSTALLFOLDER"
+               Guid="B2C3D4E5-F6A7-4890-B123-456789ABCDEF"
+               Bitness="always64">
+      <RegistryValue Root="HKLM"
+                     Key="Software\Skywere Industries\WindowsPatchManager"
+                     Name="Shortcuts"
+                     Type="integer"
+                     Value="1"
+                     KeyPath="yes" />
+      <Shortcut Id="StartMenuAppShortcut"
+                Directory="AppProgramMenuFolder"
+                Name="Windows Patch Manager"
+                Description="Scan and update installed Windows applications"
+                Target="[INSTALLFOLDER]WindowsPatchManager.exe"
+                WorkingDirectory="INSTALLFOLDER"
+                Icon="AppIcon"
+                IconIndex="0" />
+      <!-- ARP-style uninstall via msiexec /x ProductCode (standard uninstall UI) -->
+      <Shortcut Id="StartMenuUninstallShortcut"
+                Directory="AppProgramMenuFolder"
+                Name="Uninstall Windows Patch Manager"
+                Description="Uninstall Windows Patch Manager"
+                Target="[System64Folder]msiexec.exe"
+                Arguments="/x [ProductCode]"
+                Icon="AppIcon"
+                IconIndex="0" />
+      <RemoveFolder Id="RemoveAppProgramMenuFolder" Directory="AppProgramMenuFolder" On="uninstall" />
+    </Component>
+
+    <Component Id="DesktopShortcutComponent"
+               Directory="INSTALLFOLDER"
+               Guid="C3D4E5F6-A7B8-4901-C234-56789ABCDEF0"
+               Bitness="always64">
+      <RegistryValue Root="HKLM"
+                     Key="Software\Skywere Industries\WindowsPatchManager"
+                     Name="DesktopShortcut"
+                     Type="integer"
+                     Value="1"
+                     KeyPath="yes" />
+      <Shortcut Id="DesktopAppShortcut"
+                Directory="DesktopFolder"
+                Name="Windows Patch Manager"
+                Description="Scan and update installed Windows applications"
+                Target="[INSTALLFOLDER]WindowsPatchManager.exe"
+                WorkingDirectory="INSTALLFOLDER"
+                Icon="AppIcon"
+                IconIndex="0" />
+    </Component>
+
+  </Package>
+</Wix>

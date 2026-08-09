@@ -7,7 +7,7 @@ installer/ApplicationUpdater.msi
 installer/ApplicationUpdater-Setup.exe
 installer/WindowsPatchManager.msi
 installer/WindowsPatchManager-Setup.exe
-installer/wix
+# WiX project sources under installer/wix/ are tracked; bin/obj already ignored above
 artifacts/
 dist/
 *.user

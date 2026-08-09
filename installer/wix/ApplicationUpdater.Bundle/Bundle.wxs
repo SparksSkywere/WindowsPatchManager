@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Burn Setup.exe bootstrapper for Windows Patch Manager.
+
+  Displays the chained MSI UI (FeatureTree) so users can:
+  - Choose install folder
+  - Toggle Desktop shortcut (and other features)
+  - See Start Menu shortcuts (always installed with the main feature)
+
+  InstallFolder is Type=formatted so [ProgramFiles64Folder] expands correctly.
+  (Type=string left the brackets literal and caused
+   "could not access network location [ProgramFiles64]WindowsPatchManager".)
+
+  Bundle UpgradeCode is stable: installing a newer Setup.exe uninstalls the previous bundle.
+  The chained MSI MajorUpgrade also removes any prior MSI registration (same UpgradeCode).
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+
+  <Bundle Name="Windows Patch Manager"
+          Version="2.3.2"
+          Manufacturer="Skywere Industries"
+          UpgradeCode="D4E5F6A7-B8C9-4A12-D345-6789ABCDEF01"
+          Copyright="Copyright (c) Skywere Industries"
+          IconSourceFile="..\..\..\assets\installer.ico"
+          DisableModify="yes"
+          DisableRemove="no">
+
+    <!--
+      formatted = expand [ProgramFiles64Folder] at runtime.
+      Trailing backslash is required when passed as an MSI directory property.
+    -->
+    <Variable Name="InstallFolder"
+              Type="formatted"
+              Value="[ProgramFiles64Folder]WindowsPatchManager\"
+              bal:Overridable="yes" />
+
+    <BootstrapperApplication>
+      <!--
+        Minimal BA chrome (license + progress). Feature selection and install folder
+        come from the MSI UI (DisplayInternalUI) so desktop shortcut options appear.
+      -->
+      <bal:WixStandardBootstrapperApplication
+          LicenseUrl="https://opensource.org/licenses/MIT"
+          Theme="hyperlinkLicense"
+          SuppressOptionsUI="yes"
+          SuppressDowngradeFailure="no"
+          ShowVersion="yes" />
+    </BootstrapperApplication>
+
+    <Chain DisableSystemRestore="no">
+      <!--
+        DisplayInternalUI=yes → full MSI wizard (FeatureTree: folder + Desktop shortcut).
+        Do not force INSTALLFOLDER from the BA by default; MSI owns the directory dialog.
+        Permanent="no": bundle uninstall removes the MSI.
+        Visible="yes": MSI appears in Apps & features.
+      -->
+      <!--
+        WiX v4/v5: use bal:DisplayInternalUICondition (DisplayInternalUI attribute removed).
+        WixBundleAction = 6 → Install — show MSI FeatureTree (folder + Desktop shortcut).
+        Hide MSI UI on uninstall/repair so Apps & features stays clean.
+      -->
+      <MsiPackage Id="WindowsPatchManagerMsi"
+                  SourceFile="$(var.ApplicationUpdater.Installer.TargetPath)"
+                  DisplayName="Windows Patch Manager"
+                  Visible="yes"
+                  Compressed="yes"
+                  Vital="yes"
+                  Permanent="no"
+                  ForcePerMachine="yes"
+                  bal:DisplayInternalUICondition="WixBundleAction = 6">
+        <MsiProperty Name="ARPSYSTEMCOMPONENT" Value="0" />
+      </MsiPackage>
+    </Chain>
+  </Bundle>
+</Wix>
