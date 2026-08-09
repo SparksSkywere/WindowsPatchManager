@@ -63,7 +63,8 @@
     "securityUpdatesOnly": false,
     "queryMsrcOnline": true,
     "msrcMonthsToScan": 3,
-    "msrcCriticalAndImportantOnly": true
+    "msrcCriticalAndImportantOnly": true,
+    "showUninstallableMsrcGaps": false
   },
   "wsl": {
     "enabled": true,

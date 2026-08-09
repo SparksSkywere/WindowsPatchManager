@@ -27,6 +27,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _queryMsrcOnline;
     [ObservableProperty] private int _msrcMonthsToScan = 3;
     [ObservableProperty] private bool _msrcCriticalAndImportantOnly = true;
+    [ObservableProperty] private bool _showUninstallableMsrcGaps;
     [ObservableProperty] private bool _microsoftStoreEnabled;
     [ObservableProperty] private bool _wslEnabled;
     [ObservableProperty] private bool _wslIncludeDistroPackages;
@@ -91,6 +92,7 @@ public partial class SettingsViewModel : ObservableObject
         QueryMsrcOnline = c.WindowsUpdate.QueryMsrcOnline;
         MsrcMonthsToScan = Math.Clamp(c.WindowsUpdate.MsrcMonthsToScan, 1, 6);
         MsrcCriticalAndImportantOnly = c.WindowsUpdate.MsrcCriticalAndImportantOnly;
+        ShowUninstallableMsrcGaps = c.WindowsUpdate.ShowUninstallableMsrcGaps;
         MicrosoftStoreEnabled = c.UpdateSources.MicrosoftStore.Enabled;
         WslEnabled = c.UpdateSources.Wsl.Enabled && c.Wsl.Enabled;
         WslIncludeDistroPackages = c.Wsl.IncludeDistroPackages;
@@ -152,6 +154,7 @@ public partial class SettingsViewModel : ObservableObject
         c.WindowsUpdate.QueryMsrcOnline = QueryMsrcOnline;
         c.WindowsUpdate.MsrcMonthsToScan = Math.Clamp(MsrcMonthsToScan, 1, 6);
         c.WindowsUpdate.MsrcCriticalAndImportantOnly = MsrcCriticalAndImportantOnly;
+        c.WindowsUpdate.ShowUninstallableMsrcGaps = ShowUninstallableMsrcGaps;
         c.UpdateSources.MicrosoftStore.Enabled = MicrosoftStoreEnabled;
         c.UpdateSources.Wsl.Enabled = WslEnabled;
         c.Wsl.Enabled = WslEnabled;

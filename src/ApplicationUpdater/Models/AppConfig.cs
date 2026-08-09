@@ -133,19 +133,26 @@ public sealed class WindowsUpdateSettings
     public bool SecurityUpdatesOnly { get; set; }
 
     /// <summary>
-    /// When true, query Microsoft Security Response Center (MSRC) online for recent
-    /// Critical/Important CVEs and required KBs not yet installed.
+    /// When true, query Microsoft Security Response Center (MSRC) online to attach
+    /// CVE IDs / severity to pending Windows Update packages, and to discover KBs
+    /// that still need a live WU match before they can be installed.
     /// </summary>
     public bool QueryMsrcOnline { get; set; } = true;
 
-    /// <summary>How many recent monthly MSRC releases to scan for CVE→KB gaps (1–6).</summary>
+    /// <summary>How many recent monthly MSRC releases to scan for CVE→KB data (1–6).</summary>
     public int MsrcMonthsToScan { get; set; } = 3;
 
     /// <summary>
-    /// When true (default), MSRC gap scan keeps Critical and Important only.
+    /// When true (default), MSRC analysis keeps Critical and Important only.
     /// When false, also includes Moderate severity CVEs for the local OS.
     /// </summary>
     public bool MsrcCriticalAndImportantOnly { get; set; } = true;
+
+    /// <summary>
+    /// When true, list MSRC KBs that are not offered by Windows Update as informational
+    /// rows (not installable). Default false — only show updates WU can actually install.
+    /// </summary>
+    public bool ShowUninstallableMsrcGaps { get; set; }
 }
 
 public sealed class SourceToggle

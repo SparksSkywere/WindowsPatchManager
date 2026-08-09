@@ -85,13 +85,16 @@
                                   IsEnabled="{Binding CveScanEnabled}" Margin="20,0,0,0"/>
                         <CheckBox Content="MSRC: Critical and Important only" IsChecked="{Binding MsrcCriticalAndImportantOnly}"
                                   IsEnabled="{Binding QueryMsrcOnline}" Margin="40,0,0,0"/>
+                        <CheckBox Content="Show MSRC KBs not offered by Windows Update (info only, not installable)"
+                                  IsChecked="{Binding ShowUninstallableMsrcGaps}"
+                                  IsEnabled="{Binding QueryMsrcOnline}" Margin="40,0,0,0"/>
                         <StackPanel Orientation="Horizontal" Margin="40,4,0,0">
                             <TextBlock Text="MSRC months to scan:" VerticalAlignment="Center" Width="140"
                                        Style="{StaticResource MutedTextStyle}"/>
                             <TextBox Width="40" Text="{Binding MsrcMonthsToScan}"
                                      IsEnabled="{Binding QueryMsrcOnline}"/>
                         </StackPanel>
-                        <TextBlock Text="CVE scan inventories installed KBs, ranks pending WU security patches, and cross-checks Microsoft MSRC for missing Critical/Important KBs."
+                        <TextBlock Text="CVE scan enriches pending Windows Update packages with CVE/severity from MSRC. Only updates Windows Update actually offers can be installed (individual MSRC KBs are often superseded by cumulative updates)."
                                    Style="{StaticResource MutedTextStyle}" Margin="20,4,0,8" TextWrapping="Wrap"/>
                         <CheckBox Content="Windows Subsystem for Linux (WSL)" IsChecked="{Binding WslEnabled}"/>
                         <CheckBox Content="WSL distro package upgrades (apt/dnf/…)" IsChecked="{Binding WslIncludeDistroPackages}"

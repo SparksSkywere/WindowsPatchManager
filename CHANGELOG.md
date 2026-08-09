@@ -12,8 +12,9 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [2.3.2] — 2026-08-09
 
 ### Fixed
+- **CVE / security KB install failures**: MSRC-only KB rows were listed as installable even when Windows Update did not offer them, causing “not currently offered by Windows Update” for every selected CVE. Scan now **only marks installable** items that resolve to a live WU package; MSRC is used to attach CVE/severity and to discover KBs that still map to WU. Optional “show uninstallable MSRC gaps” is off by default (info-only).
 - Installer error **“could not access network location [ProgramFiles64]WindowsPatchManager”**: Burn `InstallFolder` was a raw `string`, so `[ProgramFiles64Folder]` was never expanded. Now uses a **formatted** path (and the Setup chain shows the MSI UI for the real install folder).
-- **Setup.exe** no longer hides feature options: the MSI **FeatureTree** wizard is shown (`DisplayInternalUI`), including **Desktop shortcut** and install folder, plus Start Menu shortcuts on the main feature.
+- **Setup.exe** no longer hides feature options: the MSI **FeatureTree** wizard is shown (`DisplayInternalUICondition`), including **Desktop shortcut** and install folder, plus Start Menu shortcuts on the main feature.
 
 ---
 

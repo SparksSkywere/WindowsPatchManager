@@ -68,8 +68,12 @@ public sealed class WindowsUpdateService
         => Task.Run(() => InstallInternal(program, progress, completed, total, ct), ct);
 
     /// <summary>
-    /// Full CVE/KB security pass: enrich pending WU rows, inventory installed KBs,
-    /// optionally cross-reference MSRC for missing Critical/Important security KBs.
+    /// Full CVE/KB security pass:
+    /// 1) Inventory installed KBs
+    /// 2) Enrich real Windows Update packages with MSRC CVE/severity
+    /// 3) For MSRC “missing” KBs, only add rows that resolve to a live WU package
+    ///    (installable). Pure MSRC catalog hits that WU does not offer are skipped
+    ///    (or listed informationally if ShowUninstallableMsrcGaps is on).
     /// </summary>
     private async Task<IReadOnlyList<ProgramInfo>> RunCveSecurityScanAsync(
         List<ProgramInfo> pending,
@@ -82,18 +86,20 @@ public sealed class WindowsUpdateService
         var installedKbs = await Task.Run(() => GetInstalledKbSet(ct), ct).ConfigureAwait(false);
         _log.Info($"Installed KB inventory: {installedKbs.Count} hotfix(es).");
 
-        // Mark pending updates that install KBs already present (rare race) as lower priority notes
-        foreach (var p in pending)
+        // Drop / demote pending rows whose KBs are already installed (inventory race)
+        foreach (var p in pending.ToList())
         {
             ct.ThrowIfCancellationRequested();
             if (string.IsNullOrWhiteSpace(p.KbId))
                 continue;
             var nums = ExtractKbNumbers(p.KbId);
-            if (nums.Count > 0 && nums.All(n => installedKbs.Contains(n) || installedKbs.Contains("KB" + n)))
+            if (nums.Count == 0)
+                continue;
+            if (nums.All(n => installedKbs.Contains(n) || installedKbs.Contains("KB" + n)))
             {
-                p.Notes = string.IsNullOrWhiteSpace(p.Notes)
-                    ? "KB appears already installed (inventory)"
-                    : p.Notes + " · KB appears already installed";
+                // Already installed — do not offer as an update
+                pending.Remove(p);
+                _log.Info($"Skipping {p.Name}: KB(s) already installed ({p.KbId}).");
             }
         }
 
@@ -105,13 +111,89 @@ public sealed class WindowsUpdateService
             var missing = await _msrc.FindMissingSecurityKbsAsync(installedKbs, pending, progress, ct)
                 .ConfigureAwait(false);
 
+            progress?.Report(new ScanProgress
+            {
+                Message = $"Matching {missing.Count} MSRC KB(s) to Windows Update…",
+                Percent = 80
+            });
+
+            // Live WU catalog once — used to resolve MSRC KBs to installable UpdateIDs
+            var wuCatalog = await Task.Run(() => SearchAllPendingSoftware(ct), ct).ConfigureAwait(false);
+            var resolvedCount = 0;
+            var skippedNotOffered = 0;
+
             foreach (var m in missing)
             {
-                // Avoid duplicates by KB
+                ct.ThrowIfCancellationRequested();
                 var norm = MsrcCveService.NormalizeKb(m.KbId ?? "");
-                if (pending.Any(p => ExtractKbNumbers(p.KbId).Contains(norm)))
+                if (string.IsNullOrWhiteSpace(norm))
                     continue;
-                pending.Add(m);
+
+                // Already covered by a pending WU row
+                if (pending.Any(p => ExtractKbNumbers(p.KbId).Contains(norm)))
+                {
+                    // Merge CVE metadata onto the existing row if empty
+                    var row = pending.First(p => ExtractKbNumbers(p.KbId).Contains(norm));
+                    MergeMsrcMetadata(row, m);
+                    continue;
+                }
+
+                // Resolve to a live Windows Update package (by KB article id)
+                var match = FindInCatalogByKb(wuCatalog, norm);
+                if (match is not null)
+                {
+                    MergeMsrcMetadata(match, m);
+                    // Prefer WU identity/title; keep MSRC severity/CVEs
+                    if (string.IsNullOrWhiteSpace(match.Severity) && !string.IsNullOrWhiteSpace(m.Severity))
+                    {
+                        match.Severity = m.Severity;
+                        match.SeverityRank = m.SeverityRank;
+                    }
+
+                    if (!pending.Any(p =>
+                            string.Equals(p.PackageId, match.PackageId, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        pending.Add(match);
+                        resolvedCount++;
+                    }
+
+                    continue;
+                }
+
+                skippedNotOffered++;
+                if (settings.ShowUninstallableMsrcGaps)
+                {
+                    // Informational only — cannot be installed via WU Agent
+                    m.UpdateAvailable = false;
+                    m.Version = "Not offered by WU";
+                    m.AvailableVersion = m.KbId ?? "—";
+                    m.Notes = "MSRC lists this KB for your OS, but Windows Update is not offering it " +
+                              "(already superseded by a cumulative update, not applicable to this build, " +
+                              "or not published for this SKU). Not installable from this app.";
+                    m.Origin = "MSRC (info)";
+                    pending.Add(m);
+                }
+            }
+
+            _log.Info(
+                $"MSRC→WU resolve: {resolvedCount} installable, " +
+                $"{skippedNotOffered} not offered by WU" +
+                (settings.ShowUninstallableMsrcGaps ? " (shown as info)" : " (hidden)."));
+        }
+
+        // Never offer pure msrc: rows as installable (install would fail)
+        foreach (var p in pending)
+        {
+            if (p.PackageId.StartsWith("msrc:", StringComparison.OrdinalIgnoreCase) &&
+                p.UpdateAvailable)
+            {
+                p.UpdateAvailable = false;
+                if (string.IsNullOrWhiteSpace(p.Notes) ||
+                    !p.Notes.Contains("Not installable", StringComparison.OrdinalIgnoreCase))
+                {
+                    p.Notes = (p.Notes ?? "") +
+                              " · Not offered by Windows Update on this PC (informational).";
+                }
             }
         }
 
@@ -121,37 +203,116 @@ public sealed class WindowsUpdateService
                 .Where(p => p.IsSecurityUpdate ||
                             (!string.IsNullOrWhiteSpace(p.Severity) &&
                              p.Severity is "Critical" or "Important") ||
-                            string.Equals(p.Origin, "MSRC CVE", StringComparison.OrdinalIgnoreCase))
+                            string.Equals(p.Origin, "MSRC (info)", StringComparison.OrdinalIgnoreCase))
                 .ToList();
         }
 
         if (settings.PrioritizeSecurity)
         {
             pending = pending
-                .OrderBy(p => p.SeverityRank)
+                .OrderBy(p => p.UpdateAvailable ? 0 : 1)
+                .ThenBy(p => p.SeverityRank)
                 .ThenByDescending(p => p.IsSecurityUpdate)
                 .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
                 .ToList();
         }
 
+        var installable = pending.Count(p => p.UpdateAvailable);
         var critical = pending.Count(p =>
+            p.UpdateAvailable &&
             string.Equals(p.Severity, "Critical", StringComparison.OrdinalIgnoreCase));
         var important = pending.Count(p =>
+            p.UpdateAvailable &&
             string.Equals(p.Severity, "Important", StringComparison.OrdinalIgnoreCase));
         var withCve = pending.Count(p => !string.IsNullOrWhiteSpace(p.CveIds));
 
         progress?.Report(new ScanProgress
         {
-            Message = pending.Count == 0
-                ? "No Windows / CVE security updates required"
-                : $"Found {pending.Count} update(s) · {critical} Critical · {important} Important · {withCve} with CVE",
+            Message = installable == 0
+                ? "No installable Windows / CVE security updates"
+                : $"Found {installable} installable update(s) · {critical} Critical · {important} Important · {withCve} with CVE",
             Percent = 100
         });
         _log.Info(
-            $"Windows Update / CVE scan: {pending.Count} item(s) " +
+            $"Windows Update / CVE scan: {pending.Count} row(s), {installable} installable " +
             $"({critical} Critical, {important} Important, {withCve} CVE-linked).");
 
         return pending;
+    }
+
+    /// <summary>Full software pending catalog for KB resolution (not filtered to security-only).</summary>
+    private List<ProgramInfo> SearchAllPendingSoftware(CancellationToken ct)
+    {
+        try
+        {
+            dynamic session = CreateSession();
+            dynamic searcher = session.CreateUpdateSearcher();
+            TrySetOnline(searcher);
+            var criteria = "IsInstalled=0 and IsHidden=0 and Type='Software'";
+            if (!_config.Config.WindowsUpdate.IncludeOptional)
+                criteria += " and BrowseOnly=0";
+            dynamic result = searcher.Search(criteria);
+            object updatesObj = result.Updates;
+            return MapUpdates(updatesObj, true, false, null, ct);
+        }
+        catch (Exception ex)
+        {
+            _log.Warn($"WU full software catalog for MSRC resolve failed: {ex.Message}");
+            return [];
+        }
+    }
+
+    private static ProgramInfo? FindInCatalogByKb(IReadOnlyList<ProgramInfo> catalog, string kbNorm)
+    {
+        if (string.IsNullOrWhiteSpace(kbNorm) || catalog.Count == 0)
+            return null;
+
+        foreach (var p in catalog)
+        {
+            if (ExtractKbNumbers(p.KbId).Contains(kbNorm))
+                return p.Clone();
+            if (!string.IsNullOrWhiteSpace(p.Name) &&
+                p.Name.Contains("KB" + kbNorm, StringComparison.OrdinalIgnoreCase))
+                return p.Clone();
+            if (!string.IsNullOrWhiteSpace(p.Notes) &&
+                p.Notes.Contains("KB" + kbNorm, StringComparison.OrdinalIgnoreCase))
+                return p.Clone();
+        }
+
+        return null;
+    }
+
+    private static void MergeMsrcMetadata(ProgramInfo target, ProgramInfo msrc)
+    {
+        if (string.IsNullOrWhiteSpace(target.CveIds) && !string.IsNullOrWhiteSpace(msrc.CveIds))
+            target.CveIds = msrc.CveIds;
+        else if (!string.IsNullOrWhiteSpace(msrc.CveIds) && !string.IsNullOrWhiteSpace(target.CveIds))
+        {
+            var set = new HashSet<string>(
+                target.CveIds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                StringComparer.OrdinalIgnoreCase);
+            foreach (var c in msrc.CveIds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                set.Add(c);
+            target.CveIds = string.Join(", ", set.OrderByDescending(c => c, StringComparer.OrdinalIgnoreCase).Take(8));
+        }
+
+        if (string.IsNullOrWhiteSpace(target.Severity) && !string.IsNullOrWhiteSpace(msrc.Severity))
+        {
+            target.Severity = msrc.Severity;
+            target.SeverityRank = msrc.SeverityRank;
+        }
+        else if (!string.IsNullOrWhiteSpace(msrc.Severity) &&
+                 MsrcCveService.SeverityRank(msrc.Severity) < target.SeverityRank)
+        {
+            target.Severity = msrc.Severity;
+            target.SeverityRank = msrc.SeverityRank;
+        }
+
+        target.IsSecurityUpdate = true;
+        if (string.IsNullOrWhiteSpace(target.Classification))
+            target.Classification = "Security Updates";
+        if (string.IsNullOrWhiteSpace(target.KbId) && !string.IsNullOrWhiteSpace(msrc.KbId))
+            target.KbId = msrc.KbId;
     }
 
     private List<ProgramInfo> SearchPending(
@@ -851,11 +1012,18 @@ public sealed class WindowsUpdateService
             if (!matched)
             {
                 if (program.PackageId.StartsWith("msrc:", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Defensive: msrc: rows should not be UpdateAvailable after scan; refuse cleanly.
+                    program.UpdateAvailable = false;
                     throw new InvalidOperationException(
-                        "This security KB is not currently offered by Windows Update on this PC " +
-                        "(may be superseded, not applicable, or not yet published to WU). " +
-                        "Open the support link from Notes/DownloadUrl or run Windows Update later.");
-                throw new InvalidOperationException("Update no longer available from Windows Update.");
+                        $"{program.KbId ?? "This KB"} is listed by MSRC but is not offered by Windows Update " +
+                        "on this PC (superseded by a cumulative update, wrong build, or not applicable). " +
+                        "Install the pending Cumulative / Security Quality update from the list instead, " +
+                        "or open the Microsoft support link for the KB.");
+                }
+
+                throw new InvalidOperationException(
+                    "Update is no longer available from Windows Update (may have been installed or superseded).");
             }
 
             dynamic toDownload = Activator.CreateInstance(Type.GetTypeFromProgID("Microsoft.Update.UpdateColl")!)!;
